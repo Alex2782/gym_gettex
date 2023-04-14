@@ -12,6 +12,7 @@ import gym_gettex
 
 import numpy as np
 import pandas as pd
+from datetime import datetime
 
 # RL Algorithms: https://stable-baselines3.readthedocs.io/en/master/guide/algos.html
 from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
@@ -132,12 +133,6 @@ env_name = 'GettexStocks-v0'
 
 #isin_list = []
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-#isin_list += ["US4581401001", "NL0011821202", "DE0005552004", "US02079K3059", "US5949181045"]
-#isin_list += ["US88160R1014", "DE000BASF111", "DE000BAY0017", "DE000BFB0019"]
-#isin_list += ["DE0005008007", "DE0005009740", "DE0005019004", "DE0005019038", 
-#              "DE0005032007", "DE0005089031", "DE0005093108", "DE0005102008",
-#              "DE0005103006", "DE0005104400", "DE0005104806", "DE0005110001"]
-#isin_list = ["FI0009000681"]
 
 # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
 # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
@@ -249,9 +244,9 @@ learning_timesteps_list_in_K = [10_000]  # 10k -> PPO = 1:15h, RecurrentPPO = 10
 #learning_timesteps_list_in_K = [150_000]
 
 # RL Algorithms: https://stable-baselines3.readthedocs.io/en/master/guide/algos.html
-#model_class_list = [PPO]
+model_class_list = [A2C, PPO, A2C, PPO, A2C, PPO, A2C, PPO, A2C, PPO]
 #model_class_list = [RecurrentPPO]
-model_class_list = [A2C, PPO, TRPO, ARS]
+#model_class_list = [A2C, PPO, TRPO, ARS]
 #model_class_list = [A2C, PPO]
 #model_class_list = [A2C, PPO, RecurrentPPO, TRPO]
 #model_class_list = [A2C, DDPG, DQN, PPO, SAC, TD3,
@@ -288,7 +283,8 @@ for timesteps in learning_timesteps_list_in_K:
             min, avg, max, = print_stats(rewards)
             label = f'Avg. {avg:>7.2f} : {class_name} - {step_key}'
 
-            model_path = f'./checkpoint/{env_name}-{step_key}-{int(avg)}.{class_name}'
+            now = datetime.now().strftime('%Y%m%d_%H%M%S')
+            model_path = f'./checkpoint/{env_name}-{step_key}-{int(avg)}.{now}.{class_name}'
             model.save(model_path)
                    
         except Exception as e:
