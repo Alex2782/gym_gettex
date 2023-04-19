@@ -13,6 +13,7 @@ import gym_gettex
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import gc
 
 # RL Algorithms: https://stable-baselines3.readthedocs.io/en/master/guide/algos.html
 from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
@@ -47,7 +48,7 @@ def print_stats(reward_over_episodes):
 
 # TRAINING + TEST
 # =========================================================
-def train_test_model(model, env, seed, total_num_episodes, total_learning_timesteps=10_000, eval_callback=None):
+def train_test_model(model, env, orig_env, seed, total_num_episodes, total_learning_timesteps=10_000, eval_callback=None, tb_log_name=None):
     """ if model=None then execute 'Random actions' """
 
     #reproduce training and test
@@ -65,7 +66,7 @@ def train_test_model(model, env, seed, total_num_episodes, total_learning_timest
         print(f'policy {type(model.policy)}')
         #print(f'model.learn(): {total_learning_timesteps} timesteps ...')
 
-        model.learn(total_timesteps=total_learning_timesteps, progress_bar=True, callback=eval_callback)
+        model.learn(total_timesteps=total_learning_timesteps, progress_bar=True, callback=eval_callback, tb_log_name=tb_log_name)
         # ImportError: You must install tqdm and rich in order to use the progress bar callback. 
         # It is included if you install stable-baselines with the extra packages: `pip install stable-baselines3[extra]`
 
@@ -127,115 +128,174 @@ def load_dict_data(pickle_path = '../finanzen.net.pickle'):
     return ret
 
 # -------------------------------------------------------------------------------------
-# INIT Env.
+# start_training
 # -------------------------------------------------------------------------------------
-env_name = 'GettexStocks-v0'
+def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isin_list = [], 
+                   date = None, total_num_episodes = 50,
+                   learning_timesteps_list_in_K = [3_500],
+                   model_class_list = [PPO, TRPO]):
+    
+    env_name = 'GettexStocks-v0'
 
-#isin_list = []
+    # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
+    # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
+    if len(isin_list) == 0:
+        pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
+        isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
+
+    np.random.shuffle(isin_list)
+
+    if max_data is not None and len(isin_list) > max_data: isin_list = isin_list[:max_data]
+
+    df_list = []
+    skip_counter = 0
+    for isin in isin_list:
+
+        filename = f'{isin}.csv'
+        if date is not None: filename = f'{isin}.{date}.csv'
+        path = f'/Users/alex/Develop/gettex/data_ssd/{filename}'
+
+        if not os.path.exists(path): 
+            skip_counter += 1
+            continue
+
+        df = pd.read_csv(path)
+        #print ('df:', df)
+        #print ('path:', path)
+        start_index = window_size
+        end_index = len(df)
+        #end_index = len(df) - 100
+        df_dict = dict(isin=isin, df=df, frame_bound = (start_index, end_index))
+        df_list.append(df_dict)
+
+    print (f'{skip_counter} files skipped')
+
+    env = gym.make(env_name,    
+        render_mode = None, #"human",
+        df = df_list, #df,
+        prediction_offset = prediction_offset,
+        window_size = window_size,
+        frame_bound = (start_index, end_index)
+    )
+    orig_env = env
+
+    env = Monitor(env, filename='./tensorboard_log')
+    env = DummyVecEnv([lambda: env])
+
+
+    #TODO Config for RESUME
+    # RESUME training?
+    RESUME = False #True 
+    resume_model = None
+
+    if RESUME:
+
+        env = VecNormalize.load(f'./{env_name}.vec_normalize.pkl', env)
+        #  do not update them at test time
+        env.training = True
+        # reward normalization is not needed at test time
+        env.norm_reward = True    
+
+        #model_path = f'./checkpoint/GettexStocks-v0-30000K-30.PPO'
+        #resume_model = PPO.load(model_path, env=env)
+        model_path = f'./checkpoint/GettexStocks-v0-2000K-25.RecurrentPPO'
+        resume_model = RecurrentPPO.load(model_path, env=env)
+
+    else:
+        #print ('obs:', env.reset())
+        # Automatically normalize the input features and reward
+        env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.)
+        #print ('VecNormalize-obs:', env.reset())
+
+
+    #eval_env = deepcopy(env) #TODO EvalCalback, normal erstellen, deepcopy geht nicht
+
+    seed = 42 #random seed
+    #del isin_list
+
+    eval_freq = 100_000
+
+    print ("env_name                 :", env_name)
+    print ("seed                     :", seed)
+    print ("total_num_episodes       :", total_num_episodes)
+
+    # Random actions
+    model = None 
+    total_learning_timesteps = 0
+    rewards = train_test_model(model, env, orig_env, seed, total_num_episodes, total_learning_timesteps)
+    min, avg, max = print_stats(rewards)
+    class_name = f'Random actions'
+    avg = np.mean(rewards)
+    label = f'Avg. {avg:>7.2f} : {class_name}'
+
+    for timesteps in learning_timesteps_list_in_K:
+
+        total_learning_timesteps = timesteps * 1000
+        step_key = f'{timesteps}K'
+
+        for model_class in model_class_list:
+            
+            policy_dict = model_class.policy_aliases
+            #https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html
+            # MlpPolicy or MlpLstmPolicy
+            policy = policy_dict.get('MlpPolicy')
+            if policy is None: policy = policy_dict.get('MlpLstmPolicy')
+
+            try:
+                if resume_model is None:
+                    model = model_class(policy, env, verbose=0, tensorboard_log="./tensorboard_log/")
+                else:
+                    model = resume_model
+
+                class_name = type(model).__qualname__
+
+                eval_callback = None
+                #TODO ERROR: 'NoneType' object has no attribute 'env_is_wrapped'
+                #eval_callback = EvalCallback(eval_env, best_model_save_path="./checkpoint/",
+                #                            log_path="./tensorboard_log/", eval_freq=eval_freq,
+                #                            deterministic=True, render=False)
+
+                now = datetime.now().strftime('%m%d_%H%M')
+                tb_log_name = f'{class_name}.pred+{prediction_offset}.{step_key}.{now}'
+
+                rewards = train_test_model(model, env, orig_env, seed, total_num_episodes, total_learning_timesteps, eval_callback, tb_log_name)
+                min, avg, max, = print_stats(rewards)
+                label = f'Avg. {avg:>7.2f} : {class_name} - {step_key}'
+
+                now = datetime.now().strftime('%Y%m%d_%H%M%S')
+                model_path = f'./checkpoint/{env_name}.{step_key}.{int(avg)}.pred_{prediction_offset}.{now}.{class_name}'
+                model.save(model_path)
+                del model
+                    
+            except Exception as e:
+                print (f'ERROR: {str(e)}')
+                continue
+
+    #save the VecNormalize statistics
+    #env.save(f'./{env_name}.vec_normalize.pkl')
+    now = datetime.now().strftime('%Y%m%d_%H%M%S')
+    env.save(f'./checkpoint/{env_name}.pred_{prediction_offset}.vec_normalize.{now}.pkl')
+    env.close()
+    del isin_list
+    del env
+    gc.collect()
+
+
+
+#========================================================================================
+# configuration
+#========================================================================================
+
+window_size = 30
+isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-
-# https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
-# create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
-pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
-isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-
-
-window_size = 30 #15
-prediction_offset = 4 #1
 
 date = None
 #date = '2023-03-29'
+max_data = 1000 # or None for all data
 
-np.random.shuffle(isin_list)
-
-_MAX_DATA = 1000 # or None for all data
-if _MAX_DATA is not None and len(isin_list) > _MAX_DATA: isin_list = isin_list[:_MAX_DATA]
-
-
-df_list = []
-skip_counter = 0
-for isin in isin_list:
-
-    filename = f'{isin}.csv'
-    if date is not None: filename = f'{isin}.{date}.csv'
-    path = f'/Users/alex/Develop/gettex/data_ssd/{filename}'
-
-    if not os.path.exists(path): 
-        skip_counter += 1
-        continue
-
-    df = pd.read_csv(path)
-    #print ('df:', df)
-    #print ('path:', path)
-    start_index = window_size
-    end_index = len(df)
-    #end_index = len(df) - 100
-    df_dict = dict(df=df, frame_bound = (start_index, end_index))
-    df_list.append(df_dict)
-
-print (f'{skip_counter} files skipped')
-
-
-env = gym.make(env_name,    
-    render_mode = None, #"human",
-    df = df_list, #df,
-    prediction_offset = prediction_offset,
-    window_size = window_size,
-    frame_bound = (start_index, end_index)
-)
-orig_env = env
-
-env = Monitor(env, filename='./tensorboard_log')
-env = DummyVecEnv([lambda: env])
-
-
-# RESUME training?
-RESUME = False #True
-resume_model = None
-
-if RESUME:
-
-    env = VecNormalize.load(f'./{env_name}.vec_normalize.pkl', env)
-    #  do not update them at test time
-    env.training = True
-    # reward normalization is not needed at test time
-    env.norm_reward = True    
-
-    #model_path = f'./checkpoint/GettexStocks-v0-30000K-30.PPO'
-    #resume_model = PPO.load(model_path, env=env)
-    model_path = f'./checkpoint/GettexStocks-v0-2000K-25.RecurrentPPO'
-    resume_model = RecurrentPPO.load(model_path, env=env)
-
-else:
-    #print ('obs:', env.reset())
-    # Automatically normalize the input features and reward
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.)
-    #print ('VecNormalize-obs:', env.reset())
-
-
-#eval_env = deepcopy(env) #TODO EvalCalback, normal erstellen, deepcopy geht nicht
-
-seed = 42 #random seed
-total_num_episodes = 50 #len(isin_list) #250
-#del isin_list
-
-eval_freq = 100_000
-
-print ("env_name                 :", env_name)
-print ("seed                     :", seed)
-print ("total_num_episodes       :", total_num_episodes)
-
-# Random actions
-model = None 
-total_learning_timesteps = 0
-rewards = train_test_model(model, env, seed, total_num_episodes, total_learning_timesteps)
-min, avg, max = print_stats(rewards)
-class_name = f'Random actions'
-avg = np.mean(rewards)
-label = f'Avg. {avg:>7.2f} : {class_name}'
-
-
-learning_timesteps_list_in_K = [10_000]  # 10k -> PPO = 1:15h, RecurrentPPO = 10:30h, A2C = 1:15h, TRPO = 50m, ARS = 23 min
+learning_timesteps_list_in_K = [3_500]
+#learning_timesteps_list_in_K = [10_000]  # 10k -> PPO = 1:15h, RecurrentPPO = 10:30h, A2C = 1:15h, TRPO = 50m, ARS = 23 min
 #learning_timesteps_list_in_K = [12_000] # (RecurrentPPO) = 12h
 #learning_timesteps_list_in_K = [45_000] #(for a2c, ppo, trpo) = 15h
 #learning_timesteps_list_in_K = [30_000] #(for a2c, ppo, trpo) = 10h
@@ -244,52 +304,22 @@ learning_timesteps_list_in_K = [10_000]  # 10k -> PPO = 1:15h, RecurrentPPO = 10
 #learning_timesteps_list_in_K = [150_000]
 
 # RL Algorithms: https://stable-baselines3.readthedocs.io/en/master/guide/algos.html
-model_class_list = [A2C, PPO, A2C, PPO, A2C, PPO, A2C, PPO, A2C, PPO]
+#model_class_list = [PPO, TRPO]
+#model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO]
 #model_class_list = [RecurrentPPO]
-#model_class_list = [A2C, PPO, TRPO, ARS]
+model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO] # 3 x 2 models
 #model_class_list = [A2C, PPO]
 #model_class_list = [A2C, PPO, RecurrentPPO, TRPO]
 #model_class_list = [A2C, DDPG, DQN, PPO, SAC, TD3,
 #                    ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO] #from sb3_contrib
 
-for timesteps in learning_timesteps_list_in_K:
 
-    total_learning_timesteps = timesteps * 1000
-    step_key = f'{timesteps}K'
+prediction_offset_list = [13,14,15, 17,18,19,20]
+total_num_episodes = 50
 
-    for model_class in model_class_list:
-        
-        policy_dict = model_class.policy_aliases
-        #https://stable-baselines3.readthedocs.io/en/master/guide/custom_policy.html
-        # MlpPolicy or MlpLstmPolicy
-        policy = policy_dict.get('MlpPolicy')
-        if policy is None: policy = policy_dict.get('MlpLstmPolicy')
 
-        try:
-            if resume_model is None:
-                model = model_class(policy, env, verbose=0, tensorboard_log="./tensorboard_log/")
-            else:
-                model = resume_model
+for prediction_offset in prediction_offset_list:
 
-            class_name = type(model).__qualname__
+    start_training(window_size, prediction_offset, max_data, isin_list, date, total_num_episodes, 
+                   learning_timesteps_list_in_K, model_class_list)
 
-            eval_callback = None
-            #TODO ERROR: 'NoneType' object has no attribute 'env_is_wrapped'
-            #eval_callback = EvalCallback(eval_env, best_model_save_path="./checkpoint/",
-            #                            log_path="./tensorboard_log/", eval_freq=eval_freq,
-            #                            deterministic=True, render=False)
-
-            rewards = train_test_model(model, env, seed, total_num_episodes, total_learning_timesteps, eval_callback)
-            min, avg, max, = print_stats(rewards)
-            label = f'Avg. {avg:>7.2f} : {class_name} - {step_key}'
-
-            now = datetime.now().strftime('%Y%m%d_%H%M%S')
-            model_path = f'./checkpoint/{env_name}-{step_key}-{int(avg)}.{now}.{class_name}'
-            model.save(model_path)
-                   
-        except Exception as e:
-            print (f'ERROR: {str(e)}')
-            continue
-
-#save the VecNormalize statistics
-env.save(f'./{env_name}.vec_normalize.pkl')

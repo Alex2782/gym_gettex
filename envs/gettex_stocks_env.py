@@ -29,7 +29,7 @@ class GettexStocksEnv(gym.Env):
         #self.shape = (window_size, )#(window_size * 2, )
         # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
         # no_post,vola_profit,bid_long,bid_short,ask_long,ask_short
-        self.shape = (window_size * 19, ) # 18 cols + 1 col for 'diff'
+        self.shape = (window_size * 20, ) # 18 cols + 2 col for 'diff' and 'weekdays'
 
         self.max_volatility = 10.0
 
@@ -48,8 +48,13 @@ class GettexStocksEnv(gym.Env):
         self._total_reward = None
         self._total_profit = None
 
+        self._isin = None
+        self._price_open = None
+        self._price_high = None
+        self._price_low = None
+        self._price_close = None
+
         self._prepare_data()
-        
 
     def get_data_idx(self):
         return self._random_list[self.df_current_idx]
@@ -57,7 +62,9 @@ class GettexStocksEnv(gym.Env):
     def _prepare_data(self):
 
         for i in range(self.df_len):
-            self.prices, self.signal_features = self._process_data(i)
+            isin, self.prices, self.signal_features = self._process_data(i)
+
+            self.df[i]['isin'] = isin
             self.df[i]['prices'] = self.prices
             self.df[i]['signal_features'] = self.signal_features
 
@@ -65,8 +72,10 @@ class GettexStocksEnv(gym.Env):
         """ create cache for faster training """
         self._observation_cache = []
 
-        for current_tick in range(self._start_tick, self._end_tick + 1):
-            obs = self.signal_features[(current_tick-self.window_size+1):current_tick+1].flatten()
+        for current_tick in range(self._start_tick - 1, self._end_tick + 1):
+            start = current_tick - self.window_size + 1
+            end = current_tick + 1
+            obs = self.signal_features[start:end].flatten()
             self._observation_cache.append(obs)
 
         pass
@@ -77,10 +86,11 @@ class GettexStocksEnv(gym.Env):
         df_dict = self.df[df_idx]
         df = df_dict['df']
         self.frame_bound = df_dict['frame_bound']
+        isin = df_dict['isin']
 
         # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
         # no_post,vola_profit,bid_long,bid_short,ask_long,ask_short
-        date = df.loc[:, 'Date'].to_numpy() - datetime.now().year * 10000 # subtract year from date
+        date = df.loc[:, 'Date'].to_numpy()
         HH = df.loc[:, 'HH'].to_numpy()
         MM = df.loc[:, 'MM'].to_numpy()
 
@@ -102,22 +112,45 @@ class GettexStocksEnv(gym.Env):
         ask_long = df.loc[:, 'ask_long'].to_numpy()
         ask_short = df.loc[:, 'ask_short'].to_numpy()
 
+        start = self.frame_bound[0]-self.window_size
+        end = self.frame_bound[1]
 
-        prices[self.frame_bound[0] - self.window_size]  # validate index (TODO: Improve validation)
-        prices = prices[self.frame_bound[0]-self.window_size:self.frame_bound[1]]
+        date = date[start:end]
 
-        open[self.frame_bound[0] - self.window_size]
-        open = open[self.frame_bound[0]-self.window_size:self.frame_bound[1]]
-        high[self.frame_bound[0] - self.window_size]
-        high = high[self.frame_bound[0]-self.window_size:self.frame_bound[1]]
-        low[self.frame_bound[0] - self.window_size]
-        low = low[self.frame_bound[0]-self.window_size:self.frame_bound[1]]
-        volume[self.frame_bound[0] - self.window_size]
-        volume = volume[self.frame_bound[0]-self.window_size:self.frame_bound[1]]
+        weekdays = []
+        for d in date:
+            
+            date_obj = datetime.strptime(str(d), '%Y%m%d')
+            weekday_int = date_obj.weekday()
+            weekdays.append(weekday_int)
+            #print (d, weekday_int)
 
+
+        date = date - datetime.now().year * 10000 # subtract year from date
+
+        HH = HH[start:end]
+        MM = MM[start:end]
+
+        prices = prices[start:end]
+
+        open = open[start:end]
+        high = high[start:end]
+        low = low[start:end]
         diff = np.insert(np.diff(prices), 0, 0)
-        #signal_features = diff #np.column_stack((prices, diff))
-        data_tuple = (date, HH, MM, prices, diff, open, high, low, volume, volume_ask, volume_bid, \
+
+        volume = volume[start:end]
+        volume_ask = volume_ask[start:end]
+        volume_bid = volume_bid[start:end]
+        no_pre_bid = no_pre_bid[start:end]
+        no_pre_ask = no_pre_ask[start:end]
+        no_post = no_post[start:end]
+        vola_profit = vola_profit[start:end]
+        bid_long = bid_long[start:end]
+        bid_short = bid_short[start:end]
+        ask_long = ask_long[start:end]
+        ask_short = ask_short[start:end]
+
+        data_tuple = (date, weekdays, HH, MM, prices, diff, open, high, low, volume, volume_ask, volume_bid, \
                       no_pre_bid, no_pre_ask, no_post, vola_profit, bid_long, bid_short, ask_long, ask_short)
         
         signal_features = np.column_stack(data_tuple)
@@ -126,41 +159,28 @@ class GettexStocksEnv(gym.Env):
         del df_dict['df']
         del df
 
-        return prices, signal_features
+        return isin, prices, signal_features
 
-    def _calculate_reward(self, action):
-        step_reward = 0
-
-        current_price = self.prices[self._current_tick]
-        if current_price == 0 or math.isnan(current_price): current_price = 0.001
-        next_price = self.prices[self._current_tick + self.prediction_offset]
-        price_diff = (next_price - current_price) / current_price * 100
-
-        predict_diff = price_diff - action[0]
-        if predict_diff > self.max_volatility: predict_diff = self.max_volatility
-        elif predict_diff < -self.max_volatility: predict_diff = -self.max_volatility
-
-        #false prediction = -0.85 reward
-        if (price_diff < 0 and action[0] > 0) or (price_diff > 0 and action[0] < 0): step_reward = -0.85
-        else: 
-            step_reward = 1.0 - abs(predict_diff) / self.max_volatility
-            self._total_profit += abs(price_diff)
-
-            if price_diff > 0: self._total_profit_long += price_diff
-            else: self._total_profit_short += abs(price_diff)
-
-        #print (f'step_reward: {step_reward:5.3f}, action: {action[0]:5.3f}, '\
-        #       f'current_price: {current_price:5.3f}, next_price: {next_price:5.3f} = {price_diff:.3f} %, '\
-        #       f'predict_diff:{predict_diff:.3f}, total_profit:{self._total_profit:.3f}')
-
-        return step_reward
-    
     def _get_info(self):
         return dict(
+            isin = self._isin,
             total_reward = self._total_reward,
+
             total_profit = self._total_profit,
             total_profit_long = self._total_profit_long,
-            total_profit_short = self._total_profit_short
+            total_profit_short = self._total_profit_short,
+
+            total_loss = self._total_loss,
+            total_loss_long = self._total_loss_long,
+            total_loss_short = self._total_loss_short,
+
+            total_avg_vola_profit = self._total_avg_vola_profit,
+            total_prediction_accuracy = self._total_prediction_accuracy,
+
+            price_open = self._price_open,
+            price_high = self._price_high,
+            price_low = self._price_low,
+            price_close = self._price_close
         )
 
 
@@ -182,20 +202,41 @@ class GettexStocksEnv(gym.Env):
 
         idx = self.get_data_idx()
         self.prices = self.df[idx]['prices']
+        self._isin = self.df[idx]['isin']
+
+        self._price_open = self.prices[0]
+        self._price_high = np.max(self.prices)
+        self._price_low = np.min(self.prices)
+        self._price_close = self.prices[-1]
+
         self.signal_features  = self.df[idx]['signal_features']       
         self._end_tick = len(self.prices) - 1
 
+        #print ('signal_features:', self.signal_features)
+
         self._create_observation_cache()
+
+        #print ('len signal_features   :', len(self.signal_features))
+        #print ('len _observation_cache:', len(self._observation_cache))
+
 
         self._terminated = False
         self._current_tick = self._start_tick
         self._total_reward = 0.
+        
         self._total_profit = 0.
         self._total_profit_long = 0.
         self._total_profit_short = 0.
+        
+        self._total_loss = 0.
+        self._total_loss_long = 0.
+        self._total_loss_short = 0.
+        
+        self._total_avg_vola_profit = 0.
+        self._total_prediction_accuracy = 0.
+
         self._first_rendering = True
 
-        info = self._get_info()
         observation = self._get_observation()
         info = self._get_info()
 
@@ -205,11 +246,101 @@ class GettexStocksEnv(gym.Env):
         return observation, info
 
 
+
+    def _calculate_reward(self, action):
+        step_reward = 0
+
+        start = self._current_tick - 1
+        end = self._current_tick + self.prediction_offset - 1
+
+        predict_signals = self.signal_features[start:end+1]
+
+        #data_tuple = (date, weekdays, HH, MM, prices, diff, open, high, low, volume, volume_ask, volume_bid, \
+        #              no_pre_bid, no_pre_ask, no_post, vola_profit, bid_long, bid_short, ask_long, ask_short)
+        last_signal = predict_signals[-1]
+        no_pre_bid = last_signal[12]
+        no_pre_ask = last_signal[13]
+        vola_profit = last_signal[15]
+        bid_long = last_signal[16]
+        bid_short = last_signal[17]
+        ask_long = last_signal[18]
+        ask_short = last_signal[19]
+
+        #workaround: no bid and ask, high vola_profit, very high difference bid <-> ask
+        TRADE_ERROR = False 
+        long_diff = abs(ask_long - bid_long)
+        short_diff = abs(ask_short - bid_short)
+        trade_diff = abs(short_diff - long_diff)
+        if no_pre_bid > 0 and no_pre_ask > 0 and vola_profit > 3 and trade_diff > vola_profit:
+            TRADE_ERROR = True
+            #print ('last_signal:', no_pre_bid, no_pre_ask, vola_profit)
+            #print ('TRADE_ERROR:', TRADE_ERROR, 'trade_diff:', trade_diff, long_diff, short_diff)
+            #for signal in predict_signals:
+            #    print ('signal:', signal[0], signal[1], signal[2], signal[3], signal[4], signal[5])
+            #print('-'*10)
+
+
+        if not TRADE_ERROR:
+
+            vola_profit_list = []
+            #print ('_calculate_reward:', start, end)
+            for signal in predict_signals:
+                vola_profit_list.append(signal[15])
+            #    print ('signal:', signal[1], signal[2], signal[3])
+            #print('-'*10)
+            
+            avg_vola_profit = np.mean(vola_profit_list)
+
+            self._total_avg_vola_profit = (self._total_avg_vola_profit + avg_vola_profit) / 2
+
+            current_price = self.prices[start]
+            if current_price == 0 or math.isnan(current_price): current_price = 0.001
+            next_price = self.prices[end]
+            price_diff = (next_price - current_price) / current_price * 100
+
+            #print (current_price, next_price, price_diff)
+
+            predict_diff = price_diff - action[0]
+            if predict_diff > self.max_volatility: predict_diff = self.max_volatility
+            elif predict_diff < -self.max_volatility: predict_diff = -self.max_volatility
+
+            self._total_prediction_accuracy = (self._total_prediction_accuracy + abs(predict_diff)) / 2
+
+            #negative avg_vola_profit and high action = -0.85 reward
+            if avg_vola_profit < 0 and (action[0] > 0.25 or action[0] < -0.25):
+                step_reward = -0.85
+                self._total_profit -= abs(price_diff)
+
+                if price_diff > 0: self._total_loss_long += price_diff
+                else: self._total_loss_short += abs(price_diff)                  
+            #false prediction = -0.85 reward
+            elif (price_diff < 0 and action[0] > 0) or (price_diff > 0 and action[0] < 0): 
+                step_reward = -0.85
+                self._total_profit -= abs(price_diff)
+
+                if price_diff > 0: self._total_loss_long += price_diff
+                else: self._total_loss_short += abs(price_diff)                
+            else: 
+                step_reward = 1.0 - abs(predict_diff) / self.max_volatility
+                self._total_profit += abs(price_diff)
+
+                if price_diff > 0: self._total_profit_long += price_diff
+                else: self._total_profit_short += abs(price_diff)
+
+        #print (f'step_reward: {step_reward:5.3f}, action: {action[0]:5.3f}, '\
+        #       f'current_price: {current_price:5.3f}, next_price: {next_price:5.3f} = {price_diff:.3f} %, '\
+        #       f'predict_diff:{predict_diff:.3f}, total_profit:{self._total_profit:.3f}')
+
+        return step_reward
+
     def step(self, action):
+        #print ('STEP, _current_tick: ', self._current_tick)
+
         self._terminated = False
         self._current_tick += 1
 
-        if self._current_tick + self.prediction_offset  == self._end_tick:
+        #print (self._current_tick + self.prediction_offset - 1, '==', self._end_tick)
+        if self._current_tick + self.prediction_offset - 1  == self._end_tick:
             self._terminated = True
 
         step_reward = self._calculate_reward(action)
@@ -218,10 +349,12 @@ class GettexStocksEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
 
-        #if self.render_mode == "human":
-        #    self._render_frame()
-
         return observation, step_reward, self._terminated, False, info
+
+    def close(self):
+        del self._observation_cache
+        del self.signal_features
+        del self.df
 
 
 
@@ -249,28 +382,21 @@ if __name__ == '__main__':
 
         import pandas as pd
 
-        #isin_list = []
-        #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-        #isin_list += ["US4581401001", "NL0011821202", "DE0005552004", "US02079K3059", "US5949181045"]
-        #isin_list += ["US88160R1014", "DE000BASF111", "DE000BAY0017", "DE000BFB0019"]
-        #isin_list += ["DE0005008007", "DE0005009740", "DE0005019004", "DE0005019038", 
-        #            "DE0005032007", "DE0005089031", "DE0005093108", "DE0005102008",
-        #            "DE0005103006", "DE0005104400", "DE0005104806", "DE0005110001"]
-
         # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
         # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
         pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
         isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-
+        #isin_list = ['US5339001068']
+        
         date = None
         #date = '2023-03-29'
 
-        window_size = 30 #15
+        window_size = 1 #30 #15
         prediction_offset = 4 #1
 
         np.random.shuffle(isin_list)
 
-        _MAX_DATA = None #1500
+        _MAX_DATA = 100 #None #1500
         if _MAX_DATA is not None and len(isin_list) > _MAX_DATA: isin_list = isin_list[:_MAX_DATA-1]
 
 
@@ -288,10 +414,11 @@ if __name__ == '__main__':
             df = pd.read_csv(path)
             #print ('path:', path, df)
             start_index = window_size
-            #end_index = start_index + 50
+            #start_index = 1408
+            #end_index = start_index + 6
             end_index = len(df)
             #end_index = len(df) - 300
-            df_dict = dict(df=df, frame_bound = (start_index, end_index))
+            df_dict = dict(isin=isin, df=df, frame_bound = (start_index, end_index))
             df_list.append(df_dict)
 
 
@@ -326,25 +453,27 @@ if __name__ == '__main__':
 
         for episode in tbar:
             step = 1
+
             obs = env.reset()
             done = False
 
             while not done:
                 action = env.action_space.sample()
                 action_sum += action[0]
-                #print ('-'*10, step, '-'*10)
                 obs, reward, terminated, truncated, info = env.step(action)
+                #print (obs)
                 #print (reward, terminated, truncated, info)
                 done = terminated or truncated
                 step += 1
 
             reward_over_episodes.append(info['total_reward'])
             
-        print (f'Avg. Reward   : {np.mean(reward_over_episodes):.3f}' )
-        print (f'median Reward : {np.median(reward_over_episodes):.3f}')
-        print (f'Min  Reward   : {np.min(reward_over_episodes):.3f}')
-        print (f'Max. Reward   : {np.max(reward_over_episodes):.3f}')
-        print (f'action_sum    : {action_sum:.3f}')
+        print(f'Avg. Reward   : {np.mean(reward_over_episodes):.3f}' )
+        print(f'median Reward : {np.median(reward_over_episodes):.3f}')
+        print(f'Min  Reward   : {np.min(reward_over_episodes):.3f}')
+        print(f'Max. Reward   : {np.max(reward_over_episodes):.3f}')
+        print(f'action_sum    : {action_sum:.3f}')
+        print(info)
         
     # --------------------------------------------------------------------------------------------------
 
