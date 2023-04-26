@@ -15,12 +15,8 @@ class GettexStocksEnv(gym.Env):
 
         self.render_mode = render_mode
         self.prediction_offset = prediction_offset
-
-        self.df = df
-        self.df_len = len(self.df)
-        self.df_current_idx = 0
-
         self.window_size = window_size
+
         #self.shape = (window_size, )#(window_size * 2, )
         # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
         # no_post,vola_profit,bid_long,bid_short,ask_long,ask_short
@@ -49,6 +45,12 @@ class GettexStocksEnv(gym.Env):
         self._price_low = None
         self._price_close = None
 
+        self.init_df(df)
+    
+    def init_df(self, df):
+        self.df = df
+        self.df_len = len(self.df)
+        self.df_current_idx = 0
         self._prepare_data()
 
     def get_data_idx(self):
