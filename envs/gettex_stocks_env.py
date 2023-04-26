@@ -10,7 +10,7 @@ class GettexStocksEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, df, window_size, prediction_offset=1, render_mode=None):
+    def __init__(self, df_list = None, window_size = 15, prediction_offset=1, render_mode=None):
         assert render_mode is None or render_mode in self.metadata["render_modes"]
 
         self.render_mode = render_mode
@@ -45,11 +45,12 @@ class GettexStocksEnv(gym.Env):
         self._price_low = None
         self._price_close = None
 
-        self.init_df(df)
-    
-    def init_df(self, df):
-        self.df = df
-        self.df_len = len(self.df)
+        if df_list is not None:
+            self.init_df(df_list)
+
+    def init_df_list(self, df_list):
+        self.df_list = df_list
+        self.df_len = len(self.df_list)
         self.df_current_idx = 0
         self._prepare_data()
 
@@ -61,9 +62,9 @@ class GettexStocksEnv(gym.Env):
         for i in range(self.df_len):
             isin, self.prices, self.signal_features = self._process_data(i)
 
-            self.df[i]['isin'] = isin
-            self.df[i]['prices'] = self.prices
-            self.df[i]['signal_features'] = self.signal_features
+            self.df_list[i]['isin'] = isin
+            self.df_list[i]['prices'] = self.prices
+            self.df_list[i]['signal_features'] = self.signal_features
 
     def _create_observation_cache(self):
         """ create cache for faster training """
@@ -80,7 +81,7 @@ class GettexStocksEnv(gym.Env):
 
     def _process_data(self, df_idx):
 
-        df_dict = self.df[df_idx]
+        df_dict = self.df_list[df_idx]
         df = df_dict['df']
         frame_bound = df_dict['frame_bound']
         isin = df_dict['isin']
@@ -158,7 +159,7 @@ class GettexStocksEnv(gym.Env):
 
         return isin, prices, signal_features
 
-    def _get_info(self):
+    def get_info(self):
         return dict(
             isin = self._isin,
             total_reward = self._total_reward,
@@ -181,7 +182,7 @@ class GettexStocksEnv(gym.Env):
         )
 
 
-    def _get_observation(self):
+    def get_observation(self):
         return self._observation_cache[self._current_tick-self.window_size]
 
     
@@ -198,15 +199,15 @@ class GettexStocksEnv(gym.Env):
         self.df_current_idx = (self.df_current_idx + 1) % self.df_len
 
         idx = self.get_data_idx()
-        self.prices = self.df[idx]['prices']
-        self._isin = self.df[idx]['isin']
+        self.prices = self.df_list[idx]['prices']
+        self._isin = self.df_list[idx]['isin']
 
         self._price_open = self.prices[0]
         self._price_high = np.max(self.prices)
         self._price_low = np.min(self.prices)
         self._price_close = self.prices[-1]
 
-        self.signal_features  = self.df[idx]['signal_features']       
+        self.signal_features  = self.df_list[idx]['signal_features']       
         self._end_tick = len(self.prices) - 1
 
         #print ('signal_features:', self.signal_features)
@@ -234,14 +235,13 @@ class GettexStocksEnv(gym.Env):
 
         self._first_rendering = True
 
-        observation = self._get_observation()
-        info = self._get_info()
+        observation = self.get_observation()
+        info = self.get_info()
 
         #if self.render_mode == "human":
         #    self._render_frame()
 
         return observation, info
-
 
 
     def _calculate_reward(self, action):
@@ -343,15 +343,15 @@ class GettexStocksEnv(gym.Env):
         step_reward = self._calculate_reward(action)
         self._total_reward += step_reward
 
-        observation = self._get_observation()
-        info = self._get_info()
+        observation = self.get_observation()
+        info = self.get_info()
 
         return observation, step_reward, self._terminated, False, info
 
     def close(self):
         del self._observation_cache
         del self.signal_features
-        del self.df
+        del self.df_list
 
 
 
@@ -367,26 +367,20 @@ if __name__ == '__main__':
     from gym_gettex.examples.utils import load_dict_data 
     import pandas as pd
 
-    def debug_env():
+    #-----------------------------
+    # load_data
+    #-----------------------------
+    def load_data(window_size, isin_list=[], date=None, max_data=100):
 
         # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
         # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
-        isin_list = []
-        pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
-        isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-        #isin_list += ["GB00BYQ0JC66"]
-        
-        date = None
-        #date = '2023-04-13+14'
-
-        window_size = 64 #30 #15
-        prediction_offset = 4 #1
+        if isin_list is None or len(isin_list) == 0:
+            pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
+            isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
 
         np.random.shuffle(isin_list)
 
-        _MAX_DATA = 100 #None #1500
-        if _MAX_DATA is not None and len(isin_list) > _MAX_DATA: isin_list = isin_list[:_MAX_DATA-1]
-
+        if max_data is not None and len(isin_list) > max_data: isin_list = isin_list[:max_data]
 
         df_list = []
         for isin in isin_list:
@@ -400,31 +394,38 @@ if __name__ == '__main__':
                 continue
 
             df = pd.read_csv(path, dtype=float)
-            #df = pd.read_csv(path)
 
-            #print ('path:', path, df)
             start_index = window_size
-            #start_index = 1408
-            #end_index = start_index + 6
             end_index = len(df)
-            #end_index = len(df) - 300
             df_dict = dict(isin=isin, df=df, frame_bound=(start_index, end_index))
             df_list.append(df_dict)
 
         #print ('df.dtype:', df.dtypes)
         #print ('df.memory_usage:', df.memory_usage(deep=True))
 
+        return isin_list, df_list
+
+    #-----------------------------
+    # debug_env
+    #-----------------------------
+    def debug_env():
+
+        window_size = 64 #30 #15
+        prediction_offset = 4 #1
+
+        max_data = 10
+        isin_list = []
+        #isin_list += ["GB00BYQ0JC66"]
+        date = None
+        #date = '2023-04-13+14'
+
+        isin_list, df_list = load_data(window_size, isin_list, date, max_data)
 
         total_num_episodes = len(isin_list) #* 3
-        del isin_list
-
-        #import time
-        #time.sleep(10)
-        #exit()
 
         env = gym.make('GettexStocks-v0',    
             render_mode = None, #"human",
-            df = df_list, #df,
+            #df = df_list, #optional
             prediction_offset = prediction_offset,
             window_size = window_size)
         
@@ -437,36 +438,55 @@ if __name__ == '__main__':
         #obs = env.reset()
         #print (obs)
 
-        tbar = tqdm(range(total_num_episodes))
 
-        reward_over_episodes = []
-        action_sum = 0
+        for i in range (1, 4):
 
-        for episode in tbar:
-            step = 1
-
-            obs = env.reset()
-            done = False
-
-            while not done:
-                action = env.action_space.sample()
-                #action = [-0.1]
-                action_sum += action[0]
-                obs, reward, terminated, truncated, info = env.step(action)
-                #print (obs)
-                #print (reward, terminated, truncated, info)
-                done = terminated or truncated
-                step += 1
-
-            reward_over_episodes.append(info['total_reward'])
+            print ('TRY:', i)
+            print ('-' * 50)
             
-        print(f'Avg. Reward   : {np.mean(reward_over_episodes):.3f}' )
-        print(f'median Reward : {np.median(reward_over_episodes):.3f}')
-        print(f'Min  Reward   : {np.min(reward_over_episodes):.3f}')
-        print(f'Max. Reward   : {np.max(reward_over_episodes):.3f}')
-        print(f'action_sum    : {action_sum:.3f}')
-        print(info)
+            if df_list is None:
+                isin_list = None
+                isin_list, df_list = load_data(window_size, isin_list, date, max_data)
+                print ('NEW isin_list:', isin_list)
+
+            env.init_df_list(df_list)
+
+            tbar = tqdm(range(total_num_episodes))
+
+            reward_over_episodes = []
+            action_sum = 0
+
+            for episode in tbar:
+                step = 1
+
+                obs, info = env.reset()
+                done = False
+
+                #print ('ISIN:', info['isin'])
+
+                while not done:
+                    action = env.action_space.sample()
+                    #action = [-0.1]
+                    action_sum += action[0]
+                    obs, reward, terminated, truncated, info = env.step(action)
+                    #print (obs)
+                    #print (reward, terminated, truncated, info)
+                    done = terminated or truncated
+                    step += 1
+
+                reward_over_episodes.append(info['total_reward'])
+                
+            print(f'Avg. Reward   : {np.mean(reward_over_episodes):.3f}' )
+            print(f'median Reward : {np.median(reward_over_episodes):.3f}')
+            print(f'Min  Reward   : {np.min(reward_over_episodes):.3f}')
+            print(f'Max. Reward   : {np.max(reward_over_episodes):.3f}')
+            print(f'action_sum    : {action_sum:.3f}')
+            print(info)
+
+            del df_list
+            df_list = None
         
+        env.close()
     # --------------------------------------------------------------------------------------------------
 
     debug_env()
