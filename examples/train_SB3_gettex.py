@@ -3,12 +3,12 @@
 # pip install git+https://github.com/DLR-RM/stable-baselines3@feat/gymnasium-support
 
 import os
-import pickle
 import sys
 sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
 
 import gymnasium as gym
 import gym_gettex
+from utils import *
 
 import numpy as np
 import pandas as pd
@@ -116,17 +116,6 @@ def train_test_model(model, env, orig_env, seed, total_num_episodes, total_learn
     
     return reward_over_episodes
 
-# -------------------------------------------------
-# load_dict_data
-# -------------------------------------------------
-def load_dict_data(pickle_path = '../finanzen.net.pickle'):
-    
-    ret = None
-    with open(pickle_path, 'rb') as f_in:
-        ret = pickle.loads(f_in.read())
-
-    return ret
-
 # -------------------------------------------------------------------------------------
 # start_training
 # -------------------------------------------------------------------------------------
@@ -159,7 +148,9 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
             skip_counter += 1
             continue
 
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, dtype=float)
+        #df, header_cols_dict = read_csv(path)
+
         #print ('df:', df)
         #print ('path:', path)
         start_index = window_size
@@ -174,8 +165,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
         render_mode = None, #"human",
         df = df_list, #df,
         prediction_offset = prediction_offset,
-        window_size = window_size,
-        frame_bound = (start_index, end_index)
+        window_size = window_size
     )
     orig_env = env
 
@@ -256,14 +246,14 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
                 #                            deterministic=True, render=False)
 
                 now = datetime.now().strftime('%m%d_%H%M')
-                tb_log_name = f'{class_name}.pred+{prediction_offset}.{step_key}.{now}'
+                tb_log_name = f'{class_name}.obs_{window_size}.pred+{prediction_offset}.{step_key}.{now}'
 
                 rewards = train_test_model(model, env, orig_env, seed, total_num_episodes, total_learning_timesteps, eval_callback, tb_log_name)
                 min, avg, max, = print_stats(rewards)
                 label = f'Avg. {avg:>7.2f} : {class_name} - {step_key}'
 
                 now = datetime.now().strftime('%Y%m%d_%H%M%S')
-                model_path = f'./checkpoint/{env_name}.{step_key}.{int(avg)}.pred_{prediction_offset}.{now}.{class_name}'
+                model_path = f'./checkpoint/{env_name}.obs_{window_size}.{step_key}.{int(avg)}.pred_{prediction_offset}.{now}.{class_name}'
                 model.save(model_path)
                 del model
                     
@@ -274,7 +264,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
     #save the VecNormalize statistics
     #env.save(f'./{env_name}.vec_normalize.pkl')
     now = datetime.now().strftime('%Y%m%d_%H%M%S')
-    env.save(f'./checkpoint/{env_name}.pred_{prediction_offset}.vec_normalize.{now}.pkl')
+    env.save(f'./checkpoint/{env_name}.obs_{window_size}.pred_{prediction_offset}.vec_normalize.{now}.pkl')
     env.close()
     del isin_list
     del env
@@ -286,7 +276,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
 # configuration
 #========================================================================================
 
-window_size = 30
+window_size = 64 #30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
 
@@ -314,7 +304,7 @@ model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO] # 3 x 2 models
 #                    ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO] #from sb3_contrib
 
 
-prediction_offset_list = [13,14,15, 17,18,19,20]
+prediction_offset_list = range(33, 40)
 total_num_episodes = 50
 
 

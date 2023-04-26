@@ -4,22 +4,17 @@ import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 import os
-import pickle
 import math
 
 class GettexStocksEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, df, window_size, frame_bound, prediction_offset=1, render_mode=None):
-        assert len(frame_bound) == 2
+    def __init__(self, df, window_size, prediction_offset=1, render_mode=None):
         assert render_mode is None or render_mode in self.metadata["render_modes"]
 
-        self.frame_bound = frame_bound
         self.render_mode = render_mode
         self.prediction_offset = prediction_offset
-
-        if type(df) is not list: df = [dict(df=df, frame_bound=self.frame_bound)] 
 
         self.df = df
         self.df_len = len(self.df)
@@ -85,7 +80,7 @@ class GettexStocksEnv(gym.Env):
 
         df_dict = self.df[df_idx]
         df = df_dict['df']
-        self.frame_bound = df_dict['frame_bound']
+        frame_bound = df_dict['frame_bound']
         isin = df_dict['isin']
 
         # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
@@ -111,16 +106,16 @@ class GettexStocksEnv(gym.Env):
         bid_short = df.loc[:, 'bid_short'].to_numpy()
         ask_long = df.loc[:, 'ask_long'].to_numpy()
         ask_short = df.loc[:, 'ask_short'].to_numpy()
-
-        start = self.frame_bound[0]-self.window_size
-        end = self.frame_bound[1]
+    
+        start = frame_bound[0]-self.window_size
+        end = frame_bound[1]
 
         date = date[start:end]
 
         weekdays = []
         for d in date:
             
-            date_obj = datetime.strptime(str(d), '%Y%m%d')
+            date_obj = datetime.strptime(str(int(d)), '%Y%m%d')
             weekday_int = date_obj.weekday()
             weekdays.append(weekday_int)
             #print (d, weekday_int)
@@ -363,35 +358,26 @@ class GettexStocksEnv(gym.Env):
 # ============================================
 
 if __name__ == '__main__':
-
-    # -------------------------------------------------
-    # load_dict_data
-    # -------------------------------------------------
-    def load_dict_data(pickle_path = '../finanzen.net.pickle'):
         
-        ret = None
-        with open(pickle_path, 'rb') as f_in:
-            ret = pickle.loads(f_in.read())
-
-        return ret
+    import sys
+    sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
+    import gym_gettex
+    from gym_gettex.examples.utils import load_dict_data 
+    import pandas as pd
 
     def debug_env():
-        import sys
-        sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
-        import gym_gettex
-
-        import pandas as pd
 
         # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
         # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
+        isin_list = []
         pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
         isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-        #isin_list = ['US5339001068']
+        #isin_list += ["GB00BYQ0JC66"]
         
         date = None
-        #date = '2023-03-29'
+        #date = '2023-04-13+14'
 
-        window_size = 1 #30 #15
+        window_size = 64 #30 #15
         prediction_offset = 4 #1
 
         np.random.shuffle(isin_list)
@@ -411,15 +397,20 @@ if __name__ == '__main__':
                 print (f'not exists: {path}')
                 continue
 
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, dtype=float)
+            #df = pd.read_csv(path)
+
             #print ('path:', path, df)
             start_index = window_size
             #start_index = 1408
             #end_index = start_index + 6
             end_index = len(df)
             #end_index = len(df) - 300
-            df_dict = dict(isin=isin, df=df, frame_bound = (start_index, end_index))
+            df_dict = dict(isin=isin, df=df, frame_bound=(start_index, end_index))
             df_list.append(df_dict)
+
+        #print ('df.dtype:', df.dtypes)
+        #print ('df.memory_usage:', df.memory_usage(deep=True))
 
 
         total_num_episodes = len(isin_list) #* 3
@@ -433,14 +424,12 @@ if __name__ == '__main__':
             render_mode = None, #"human",
             df = df_list, #df,
             prediction_offset = prediction_offset,
-            window_size = window_size,
-            frame_bound = (start_index, end_index))
+            window_size = window_size)
         
         #print (env.signal_features)
         #print (env.action_space)
         #print (env.observation_space)
 
-        
         #obs, info = env.reset()
         #print (obs, info)
         #obs = env.reset()
@@ -459,6 +448,7 @@ if __name__ == '__main__':
 
             while not done:
                 action = env.action_space.sample()
+                #action = [-0.1]
                 action_sum += action[0]
                 obs, reward, terminated, truncated, info = env.step(action)
                 #print (obs)

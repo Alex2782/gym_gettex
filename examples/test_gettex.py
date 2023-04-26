@@ -7,7 +7,7 @@ import gym_gettex
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import pickle
+from utils import *
 
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -21,16 +21,6 @@ from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from sb3_contrib import ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO 
 
 
-# -------------------------------------------------
-# load_dict_data
-# -------------------------------------------------
-def load_dict_data(pickle_path = '../finanzen.net.pickle'):
-    
-    ret = None
-    with open(pickle_path, 'rb') as f_in:
-        ret = pickle.loads(f_in.read())
-
-    return ret
 
 # -------------------------------------------------------------------------------------
 # test_model
@@ -66,7 +56,8 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
             skip_counter += 1
             continue
 
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, dtype=float)
+
         #print ('path:', path)
         start_index = window_size
         #end_index = start_index + 10
@@ -81,8 +72,7 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
         render_mode = None, #"human",
         df = df_list, #df,
         prediction_offset = prediction_offset,
-        window_size = window_size,
-        frame_bound = (start_index, end_index)
+        window_size = window_size
     )
 
     idx = 0
@@ -254,24 +244,27 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=Warning)
 
-window_size = 30
+window_size = 64 #30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-#isin_list += ["GB00BYQ0JC66"]
-
+isin_list += ["GB00BYQ0JC66"]
 
 date = None
-#date = '2023-03-29'
-max_data = 20 # or None for all data
+#date = '2023-04-13' #'2023-04-14'
+date = '2023-04-13+14'
+max_data = 1 #10 # or None for all data
 
-model_path = f'./checkpoint/GettexStocks-v0.3500K.29.pred_1.20230419_035236.PPO'
-vec_normalize_path = './checkpoint/GettexStocks-v0.pred_1.vec_normalize.20230419_041750.pkl'
-#vec_normalize_path = './checkpoint/GettexStocks-v0.pred_3.vec_normalize.20230419_075245.pkl'
-#vec_normalize_path = './checkpoint/GettexStocks-v0.pred_5.vec_normalize.20230419_113034.pkl'
+#model_path = f'./checkpoint/GettexStocks-v0.3500K.29.pred_1.20230419_035236.PPO'
+model_path = f'./checkpoint/obs_64/GettexStocks-v0.obs_64.3500K.40.pred_5.20230422_231937.TRPO'
+
+#vec_normalize_path = './checkpoint/GettexStocks-v0.pred_1.vec_normalize.20230419_041750.pkl'
+vec_normalize_path = './checkpoint/obs_64/GettexStocks-v0.obs_64.pred_5.vec_normalize.20230423_005402.pkl'
+
 
 output_min_profit = None #0.0 # or None for no filter
 
-prediction_offset_list = [1]
+prediction_offset_list = [5]
 
 for prediction_offset in prediction_offset_list:
     test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path)
+
