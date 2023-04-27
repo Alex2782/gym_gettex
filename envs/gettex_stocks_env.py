@@ -368,6 +368,12 @@ if __name__ == '__main__':
     import pandas as pd
 
     #-----------------------------
+    # get_finanzen_stock_isin_list
+    #-----------------------------    
+    def get_finanzen_stock_isin_list(pickle_path = '/Users/alex/Develop/gettex/finanzen.net.pickle'):
+            return load_dict_data(pickle_path)['AKTIE']['isin_list']        
+
+    #-----------------------------
     # load_data
     #-----------------------------
     def load_data(window_size, isin_list=[], date=None, max_data=100):
@@ -375,10 +381,8 @@ if __name__ == '__main__':
         # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
         # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
         if isin_list is None or len(isin_list) == 0:
-            pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
-            isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-
-        np.random.shuffle(isin_list)
+            isin_list = get_finanzen_stock_isin_list()
+            np.random.shuffle(isin_list)
 
         if max_data is not None and len(isin_list) > max_data: isin_list = isin_list[:max_data]
 
@@ -413,15 +417,13 @@ if __name__ == '__main__':
         window_size = 64 #30 #15
         prediction_offset = 4 #1
 
-        max_data = 10
+        max_data = 256 #None #10
         isin_list = []
         #isin_list += ["GB00BYQ0JC66"]
         date = None
         #date = '2023-04-13+14'
 
-        isin_list, df_list = load_data(window_size, isin_list, date, max_data)
-
-        total_num_episodes = len(isin_list) #* 3
+        #isin_list, df_list = load_data(window_size, isin_list, date, max_data)
 
         env = gym.make('GettexStocks-v0',    
             render_mode = None, #"human",
@@ -439,16 +441,28 @@ if __name__ == '__main__':
         #print (obs)
 
 
-        for i in range (1, 4):
+        isin_list = get_finanzen_stock_isin_list()
+        np.random.shuffle(isin_list)
 
-            print ('TRY:', i)
+        batch_list = np.array_split(isin_list, len(isin_list)/max_data + 1)
+
+        counter = 0
+        for batch_isin in batch_list:
+            counter += len(batch_isin)
+            print (len(batch_isin))
+
+        len_batch = len(batch_list)
+
+        for i in range (0, len_batch):
+
+            print ('TRY:', i + 1, ' / ', len_batch)
             print ('-' * 50)
-            
-            if df_list is None:
-                isin_list = None
-                isin_list, df_list = load_data(window_size, isin_list, date, max_data)
-                print ('NEW isin_list:', isin_list)
 
+            batch_isin = batch_list[i]
+
+            batch_isin, df_list = load_data(window_size, batch_isin, date, None)
+            total_num_episodes = len(df_list)
+            
             env.init_df_list(df_list)
 
             tbar = tqdm(range(total_num_episodes))
@@ -484,7 +498,6 @@ if __name__ == '__main__':
             print(info)
 
             del df_list
-            df_list = None
         
         env.close()
     # --------------------------------------------------------------------------------------------------
