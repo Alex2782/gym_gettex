@@ -21,148 +21,32 @@ from stable_baselines3 import A2C, DDPG, DQN, PPO, SAC, TD3
 from sb3_contrib import ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO 
 
 
+# -------------------------------------------------------------------------------------
+# output_over_batch_stats
+# -------------------------------------------------------------------------------------
+def output_over_batch_stats(reward_over_batch, total_profit_over_batch, total_avg_vola_profit_over_batch):
+    print ('='*20, 'OVER BATCH STATS', '='*20)
+
+    print ('Avg. Reward   : ', np.mean(reward_over_batch))
+    print ('median Reward : ', np.median(reward_over_batch))
+    print ('Min  Reward   : ', np.min(reward_over_batch))
+    print ('Max. Reward   : ', np.max(reward_over_batch))
+    print ('-'*60)
+    print ('Avg. Profit   : ', np.mean(total_profit_over_batch))
+    print ('median Profit : ', np.median(total_profit_over_batch))
+    print ('Min  Profit   : ', np.min(total_profit_over_batch))
+    print ('Max. Profit   : ', np.max(total_profit_over_batch))
+    print ('-'*60)
+    print ('Avg. Vol. Profit   : ', np.mean(total_avg_vola_profit_over_batch))
+    print ('median Vol. Profit : ', np.median(total_avg_vola_profit_over_batch))
+    print ('Min  Vol. Profit   : ', np.min(total_avg_vola_profit_over_batch))
+    print ('Max. Vol. Profit   : ', np.max(total_avg_vola_profit_over_batch))
 
 # -------------------------------------------------------------------------------------
-# test_model
+# output_stats
 # -------------------------------------------------------------------------------------
-def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = [], date = None, 
-               output_min_profit=0.0, model_path=None, vec_normalize_path=None):
-
-    env_name = 'GettexStocks-v0'
-
-    #isin_list = ['US6701002056', 'US22658D1000', 'US1567271093', 'US0028962076', 'US69370C1009', 'SE0012141687', 'PLBH00000012']
-    #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-
-    # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
-    # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
-    if len(isin_list) == 0:
-        pickle_path = f'/Users/alex/Develop/gettex/finanzen.net.pickle'
-        isin_list = load_dict_data(pickle_path)['AKTIE']['isin_list']
-
-    np.random.shuffle(isin_list)
-
-    if max_data is not None and len(isin_list) > max_data: isin_list = isin_list[:max_data]
-
-    df_list = []
-
-    skip_counter = 0
-    for isin in isin_list:
-        
-        filename = f'{isin}.csv'
-        if date is not None: filename = f'{isin}.{date}.csv'
-        path = f'/Users/alex/Develop/gettex/data_ssd/{filename}'
-
-        if not os.path.exists(path): 
-            skip_counter += 1
-            continue
-
-        df = pd.read_csv(path, dtype=float)
-
-        #print ('path:', path)
-        start_index = window_size
-        #end_index = start_index + 10
-        end_index = len(df)
-        #end_index = len(df) - 300
-        df_dict = dict(isin=isin, df=df, frame_bound = (start_index, end_index))
-        df_list.append(df_dict)
-
-    print (f'{skip_counter} files skipped')
-
-    env = gym.make(env_name,    
-        render_mode = None, #"human",
-        df = df_list, #df,
-        prediction_offset = prediction_offset,
-        window_size = window_size
-    )
-
-    idx = 0
-    for f in env.signal_features:
-        #print(f'{idx:>6d} = {f[0]:.3f}, {f[1]:>7.3f}, {f[2]:>7.3f}, {f[3]:>7.3f}, {f[4]:>7.3f}, {f[5]:>7.3f}')
-        #print(f'{idx:>6d} = {f:.3f}')
-        idx += 1
-
-    orig_env = env
-
-    env = DummyVecEnv([lambda: env])
-
-    if vec_normalize_path is not None:
-        env = VecNormalize.load(vec_normalize_path, env)
-
-    #  do not update them at test time
-    env.training = False
-    # reward normalization is not needed at test time
-    env.norm_reward = False
-
-    total_num_episodes = len(isin_list) - skip_counter #10
-
-    model_class_dict = {'A2C':A2C, 'DDPG':DDPG, 'DQN':DQN, 'PPO':PPO, 'SAC':SAC, 'TD3':TD3, 'ARS':ARS, 
-                        'QRDQN':QRDQN, 'RecurrentPPO':RecurrentPPO, 'TQC':TQC, 'TRPO':TRPO, 'MaskablePPO': MaskablePPO}
-
-
-    model_class = model_path.split('.')[-1]
-    model = model_class_dict[model_class].load(model_path, env=env)
-
-    print ('model:', model, 'path:', model_path)
-
-    vec_env = model.get_env()  
-    reward_over_episodes = []
-    episode_prices = []
-    episode_isin = []
-
-    total_avg_vola_profit = []
-    total_prediction_accuracy = []
-
-    total_profit = []
-    profit_long = []
-    profit_short = []
-    loss_long = []
-    loss_short = []
-
-    tbar = tqdm(range(total_num_episodes))
-
-    action_sum = 0
-    result_counter = {'Action-Sum':0, 'Long-True':0, 'Short-True':0, 'Long-False':0, 'Short-False':0, 'Hold-True':0, 'Hold-False':0}
-
-    obs = vec_env.reset()
-
-    for episode in tbar:
-
-        done = False
-
-        while not done:
-            action, _states = model.predict(obs, deterministic=True)
-            obs, reward, done, info = vec_env.step(action)
-
-            action_sum += action
-
-            if reward > 0:
-                if action > 0: result_counter['Long-True'] += 1
-                elif action < 0: result_counter['Short-True'] += 1
-            elif reward < 0:
-                if action > 0: result_counter['Long-False'] += 1
-                elif action < 0: result_counter['Short-False'] += 1
-            else:
-                if action == 0: result_counter['Hold-True'] += 1
-                elif action != 0: result_counter['Hold-False'] += 1            
-
-        i = info[0]
-        episode_isin.append(i['isin'])
-        reward_over_episodes.append(i['total_reward'])
-
-        price_tuple = (i['price_open'], i['price_high'], i['price_low'], i['price_close'])
-        episode_prices.append(price_tuple)
-
-        total_avg_vola_profit.append(i['total_avg_vola_profit'])
-        total_prediction_accuracy.append(i['total_prediction_accuracy'])
-
-        total_profit.append(i['total_profit'])
-        profit_long.append(i['total_profit_long'])
-        profit_short.append(i['total_profit_short'])
-        loss_long.append(i['total_loss_long'])
-        loss_short.append(i['total_loss_short'])
-
-    tbar.close()
-
+def output_stats(reward_over_episodes, result_counter, action_sum, episode_isin, total_profit, profit_long,
+                 profit_short, loss_long, loss_short, total_avg_vola_profit, total_prediction_accuracy, episode_prices):
 
     print ('Avg. Reward   : ', np.mean(reward_over_episodes))
     print ('median Reward : ', np.median(reward_over_episodes))
@@ -233,6 +117,143 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
         print(f'{grey_color}{line}{normal_color}')
 
 
+# -------------------------------------------------------------------------------------
+# test_model
+# -------------------------------------------------------------------------------------
+def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = [], date = None, 
+               output_min_profit=0.0, model_path=None, vec_normalize_path=None):
+
+    env_name = 'GettexStocks-v0'
+
+    env = gym.make(env_name,    
+        render_mode = None, #"human",
+        #df = df_list, #optional
+        prediction_offset = prediction_offset,
+        window_size = window_size
+    )
+
+    orig_env = env
+
+    env = DummyVecEnv([lambda: env])
+
+    if vec_normalize_path is not None:
+        env = VecNormalize.load(vec_normalize_path, env)
+
+    #  do not update them at test time
+    env.training = False
+    # reward normalization is not needed at test time
+    env.norm_reward = False
+
+    model_class_dict = {'A2C':A2C, 'DDPG':DDPG, 'DQN':DQN, 'PPO':PPO, 'SAC':SAC, 'TD3':TD3, 'ARS':ARS, 
+                        'QRDQN':QRDQN, 'RecurrentPPO':RecurrentPPO, 'TQC':TQC, 'TRPO':TRPO, 'MaskablePPO': MaskablePPO}
+
+    model_class = model_path.split('.')[-1]
+    model = model_class_dict[model_class].load(model_path, env=env)
+
+    print ('model:', model, 'path:', model_path)
+    vec_env = model.get_env()  
+
+
+    # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
+    # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
+    if isin_list is None or len(isin_list) == 0:
+        isin_list = get_finanzen_stock_isin_list()
+        np.random.shuffle(isin_list)
+
+    batch_list = np.array_split(isin_list, len(isin_list)/max_data + 1)
+    len_batch = len(batch_list)
+
+    min_df_len = window_size + prediction_offset + 1
+
+    reward_over_batch = []
+    total_profit_over_batch = []
+    total_avg_vola_profit_over_batch = []
+
+    for i in range (0, len_batch):
+
+        print ('BATCH:', i + 1, ' / ', len_batch)
+        print ('-' * 50)
+
+        batch_isin = batch_list[i]
+
+        batch_isin, df_list, skip_counter = load_data(window_size, batch_isin, date, None, min_df_len)
+        print (f'{skip_counter} files skipped')
+        
+        orig_env.init_df_list(df_list)
+
+        action_sum = 0
+
+        reward_over_episodes = []
+        episode_prices = []
+        episode_isin = []
+
+        total_avg_vola_profit = []
+        total_prediction_accuracy = []
+
+        total_profit = []
+        profit_long = []
+        profit_short = []
+        loss_long = []
+        loss_short = []
+
+        total_num_episodes = len(df_list) - skip_counter
+        tbar = tqdm(range(total_num_episodes))
+
+        action_sum = 0
+        result_counter = {'Action-Sum':0, 'Long-True':0, 'Short-True':0, 'Long-False':0, 'Short-False':0, 'Hold-True':0, 'Hold-False':0}
+
+        obs = vec_env.reset()
+
+        for episode in tbar:
+
+            done = False
+
+            while not done:
+                action, _states = model.predict(obs, deterministic=True)
+                obs, reward, done, info = vec_env.step(action)
+
+                action_sum += action
+
+                if reward > 0:
+                    if action > 0: result_counter['Long-True'] += 1
+                    elif action < 0: result_counter['Short-True'] += 1
+                elif reward < 0:
+                    if action > 0: result_counter['Long-False'] += 1
+                    elif action < 0: result_counter['Short-False'] += 1
+                else:
+                    if action == 0: result_counter['Hold-True'] += 1
+                    elif action != 0: result_counter['Hold-False'] += 1            
+
+            i = info[0]
+            episode_isin.append(i['isin'])
+            reward_over_episodes.append(i['total_reward'])
+
+            price_tuple = (i['price_open'], i['price_high'], i['price_low'], i['price_close'])
+            episode_prices.append(price_tuple)
+
+            total_avg_vola_profit.append(i['total_avg_vola_profit'])
+            total_prediction_accuracy.append(i['total_prediction_accuracy'])
+
+            total_profit.append(i['total_profit'])
+            profit_long.append(i['total_profit_long'])
+            profit_short.append(i['total_profit_short'])
+            loss_long.append(i['total_loss_long'])
+            loss_short.append(i['total_loss_short'])
+
+        tbar.close()
+
+        output_stats(reward_over_episodes, result_counter, action_sum, episode_isin, total_profit, profit_long,
+                 profit_short, loss_long, loss_short, total_avg_vola_profit, total_prediction_accuracy, episode_prices)
+        
+        reward_over_batch += reward_over_episodes 
+        total_profit_over_batch += total_profit
+        total_avg_vola_profit_over_batch += total_avg_vola_profit
+    
+    #output 'OVER BATCH STATS'
+    output_over_batch_stats(reward_over_batch, total_profit_over_batch, total_avg_vola_profit_over_batch)
+
+
+
 #========================================================================================
 # configuration
 #========================================================================================
@@ -244,26 +265,30 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=Warning)
 
-window_size = 64 #30
+window_size = 30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
-isin_list += ["GB00BYQ0JC66"]
+#isin_list += ["GB00BYQ0JC66"]
 
 date = None
-#date = '2023-04-13' #'2023-04-14'
-date = '2023-04-13+14'
-max_data = 1 #10 # or None for all data
+date = '2023-04-13' #'2023-04-14'
+#date = '2023-04-13+14'
+max_data = 256 #10 # or None for all data
 
 #model_path = f'./checkpoint/GettexStocks-v0.3500K.29.pred_1.20230419_035236.PPO'
-model_path = f'./checkpoint/obs_64/GettexStocks-v0.obs_64.3500K.40.pred_5.20230422_231937.TRPO'
+#model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.23.pred_5.20230419_112113.TRPO'
+model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.39.pred_6.20230419_121049.PPO'
+
 
 #vec_normalize_path = './checkpoint/GettexStocks-v0.pred_1.vec_normalize.20230419_041750.pkl'
-vec_normalize_path = './checkpoint/obs_64/GettexStocks-v0.obs_64.pred_5.vec_normalize.20230423_005402.pkl'
+#vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_5.vec_normalize.20230419_113034.pkl'
+vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_6.vec_normalize.20230419_135601.pkl'
+
 
 
 output_min_profit = None #0.0 # or None for no filter
 
-prediction_offset_list = [5]
+prediction_offset_list = [6]
 
 for prediction_offset in prediction_offset_list:
     test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path)

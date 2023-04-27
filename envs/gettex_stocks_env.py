@@ -3,7 +3,6 @@ from gymnasium import spaces
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
-import os
 import math
 
 class GettexStocksEnv(gym.Env):
@@ -364,50 +363,7 @@ if __name__ == '__main__':
     import sys
     sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
     import gym_gettex
-    from gym_gettex.examples.utils import load_dict_data 
-    import pandas as pd
-
-    #-----------------------------
-    # get_finanzen_stock_isin_list
-    #-----------------------------    
-    def get_finanzen_stock_isin_list(pickle_path = '/Users/alex/Develop/gettex/finanzen.net.pickle'):
-            return load_dict_data(pickle_path)['AKTIE']['isin_list']        
-
-    #-----------------------------
-    # load_data
-    #-----------------------------
-    def load_data(window_size, isin_list=[], date=None, max_data=100):
-
-        # https://mein.finanzen-zero.net/assets/searchdata/downloadable-instruments.csv
-        # create pickle file: https://github.com/Alex2782/gettex-import/blob/main/finanzen_net.py
-        if isin_list is None or len(isin_list) == 0:
-            isin_list = get_finanzen_stock_isin_list()
-            np.random.shuffle(isin_list)
-
-        if max_data is not None and len(isin_list) > max_data: isin_list = isin_list[:max_data]
-
-        df_list = []
-        for isin in isin_list:
-            
-            filename = f'{isin}.csv'
-            if date is not None: filename = f'{isin}.{date}.csv'
-            path = f'/Users/alex/Develop/gettex/data_ssd/{filename}'
-
-            if not os.path.exists(path): 
-                print (f'not exists: {path}')
-                continue
-
-            df = pd.read_csv(path, dtype=float)
-
-            start_index = window_size
-            end_index = len(df)
-            df_dict = dict(isin=isin, df=df, frame_bound=(start_index, end_index))
-            df_list.append(df_dict)
-
-        #print ('df.dtype:', df.dtypes)
-        #print ('df.memory_usage:', df.memory_usage(deep=True))
-
-        return isin_list, df_list
+    from gym_gettex.examples.utils import load_data, get_finanzen_stock_isin_list
 
     #-----------------------------
     # debug_env
@@ -445,17 +401,11 @@ if __name__ == '__main__':
         np.random.shuffle(isin_list)
 
         batch_list = np.array_split(isin_list, len(isin_list)/max_data + 1)
-
-        counter = 0
-        for batch_isin in batch_list:
-            counter += len(batch_isin)
-            print (len(batch_isin))
-
         len_batch = len(batch_list)
 
         for i in range (0, len_batch):
 
-            print ('TRY:', i + 1, ' / ', len_batch)
+            print ('BATCH:', i + 1, ' / ', len_batch)
             print ('-' * 50)
 
             batch_isin = batch_list[i]
