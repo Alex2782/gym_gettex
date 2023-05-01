@@ -121,7 +121,7 @@ def output_stats(reward_over_episodes, result_counter, action_sum, episode_isin,
 # test_model
 # -------------------------------------------------------------------------------------
 def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = [], date = None, 
-               output_min_profit=0.0, model_path=None, vec_normalize_path=None):
+               output_min_profit=0.0, model_path=None, vec_normalize_path=None, _show_predict_stats=False):
 
     env_name = 'GettexStocks-v0'
 
@@ -204,6 +204,10 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
 
         obs = vec_env.reset()
 
+        info = orig_env.get_info()
+        isin = info['isin']
+        predict_stats = []
+
         for episode in tbar:
 
             done = False
@@ -211,6 +215,14 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
             while not done:
                 action, _states = model.predict(obs, deterministic=True)
                 obs, reward, done, info = vec_env.step(action)
+
+                if _show_predict_stats:
+                    predict_datetime = info[0]['predict_datetime']
+                    current_price = info[0]['current_price']
+                    next_price = info[0]['next_price']
+                    predict_price = info[0]['predict_price']
+
+                    predict_stats.append([predict_datetime, reward[0], current_price, next_price, action[0][0], predict_price])
 
                 action_sum += action
 
@@ -240,7 +252,11 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
             loss_long.append(i['total_loss_long'])
             loss_short.append(i['total_loss_short'])
 
+            if _show_predict_stats:
+                show_predict_stats(isin, date, predict_stats)
+
         tbar.close()
+
 
         output_stats(reward_over_episodes, result_counter, action_sum, episode_isin, total_profit, profit_long,
                  profit_short, loss_long, loss_short, total_avg_vola_profit, total_prediction_accuracy, episode_prices)
@@ -269,27 +285,31 @@ window_size = 30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
 #isin_list += ["GB00BYQ0JC66"]
+#isin_list += ["US0396531008"]
 
 date = None
-date = '2023-04-13' #'2023-04-14'
+#date = '2023-04-13' #'2023-04-14'
 #date = '2023-04-13+14'
 max_data = 256 #10 # or None for all data
 
 #model_path = f'./checkpoint/GettexStocks-v0.3500K.29.pred_1.20230419_035236.PPO'
 #model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.23.pred_5.20230419_112113.TRPO'
 model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.39.pred_6.20230419_121049.PPO'
-
+#model_path = f'./checkpoint/obs_64/GettexStocks-v0.obs_64.3500K.48.pred_2.20230422_150846.PPO'
 
 #vec_normalize_path = './checkpoint/GettexStocks-v0.pred_1.vec_normalize.20230419_041750.pkl'
 #vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_5.vec_normalize.20230419_113034.pkl'
 vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_6.vec_normalize.20230419_135601.pkl'
+#vec_normalize_path = './checkpoint/obs_64/GettexStocks-v0.obs_64.pred_2.vec_normalize.20230422_170303.pkl'
 
 
 
-output_min_profit = None #0.0 # or None for no filter
+output_min_profit = 10.0 # or None for no filter
+_show_predict_stats = False
 
 prediction_offset_list = [6]
 
 for prediction_offset in prediction_offset_list:
-    test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path)
+    test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path,
+               _show_predict_stats)
 

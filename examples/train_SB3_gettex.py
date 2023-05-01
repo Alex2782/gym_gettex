@@ -163,7 +163,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
 
     env = gym.make(env_name,    
         render_mode = None, #"human",
-        df = df_list, #df,
+        df_list = df_list, #df,
         prediction_offset = prediction_offset,
         window_size = window_size
     )
@@ -276,7 +276,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
 # configuration
 #========================================================================================
 
-window_size = 64 #30
+window_size = 30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
 
@@ -297,14 +297,14 @@ learning_timesteps_list_in_K = [3_500]
 #model_class_list = [PPO, TRPO]
 #model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO]
 #model_class_list = [RecurrentPPO]
-model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO] # 3 x 2 models
+model_class_list = [PPO, TRPO, PPO, TRPO, RecurrentPPO]
 #model_class_list = [A2C, PPO]
 #model_class_list = [A2C, PPO, RecurrentPPO, TRPO]
 #model_class_list = [A2C, DDPG, DQN, PPO, SAC, TD3,
 #                    ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO] #from sb3_contrib
 
 
-prediction_offset_list = range(33, 40)
+prediction_offset_list = range(1, 5)
 total_num_episodes = 50
 
 

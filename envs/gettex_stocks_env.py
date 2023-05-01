@@ -1,10 +1,10 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from datetime import datetime
 import math
-
 class GettexStocksEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
@@ -39,13 +39,18 @@ class GettexStocksEnv(gym.Env):
         self._total_profit = None
 
         self._isin = None
+        self._predict_datetime = None
         self._price_open = None
         self._price_high = None
         self._price_low = None
         self._price_close = None
 
+        self._current_price = None
+        self._next_price = None
+        self._predict_price = None
+
         if df_list is not None:
-            self.init_df(df_list)
+            self.init_df_list(df_list)
 
     def init_df_list(self, df_list):
         self.df_list = df_list
@@ -59,11 +64,12 @@ class GettexStocksEnv(gym.Env):
     def _prepare_data(self):
 
         for i in range(self.df_len):
-            isin, self.prices, self.signal_features = self._process_data(i)
+            isin, self.prices, self.signal_features, self.datetime_list = self._process_data(i)
 
             self.df_list[i]['isin'] = isin
             self.df_list[i]['prices'] = self.prices
             self.df_list[i]['signal_features'] = self.signal_features
+            self.df_list[i]['datetime_list'] = self.datetime_list
 
     def _create_observation_cache(self):
         """ create cache for faster training """
@@ -87,6 +93,9 @@ class GettexStocksEnv(gym.Env):
 
         # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
         # no_post,vola_profit,bid_long,bid_short,ask_long,ask_short
+        dt = df['Date'].astype(int).astype(str) + ' ' + df['HH'].astype(int).astype(str) + ':' + df['MM'].astype(int).astype(str)
+        datetime_list = pd.to_datetime(dt)        
+
         date = df.loc[:, 'Date'].to_numpy()
         HH = df.loc[:, 'HH'].to_numpy()
         MM = df.loc[:, 'MM'].to_numpy()
@@ -156,11 +165,12 @@ class GettexStocksEnv(gym.Env):
         del df_dict['df']
         del df
 
-        return isin, prices, signal_features
+        return isin, prices, signal_features, datetime_list
 
     def get_info(self):
         return dict(
             isin = self._isin,
+            predict_datetime = self._predict_datetime,
             total_reward = self._total_reward,
 
             total_profit = self._total_profit,
@@ -177,7 +187,11 @@ class GettexStocksEnv(gym.Env):
             price_open = self._price_open,
             price_high = self._price_high,
             price_low = self._price_low,
-            price_close = self._price_close
+            price_close = self._price_close,
+
+            current_price = self._current_price,
+            next_price = self._next_price,
+            predict_price = self._predict_price
         )
 
 
@@ -206,7 +220,8 @@ class GettexStocksEnv(gym.Env):
         self._price_low = np.min(self.prices)
         self._price_close = self.prices[-1]
 
-        self.signal_features  = self.df_list[idx]['signal_features']       
+        self.signal_features  = self.df_list[idx]['signal_features']      
+        self.datetime_list  = self.df_list[idx]['datetime_list']
         self._end_tick = len(self.prices) - 1
 
         #print ('signal_features:', self.signal_features)
@@ -220,6 +235,11 @@ class GettexStocksEnv(gym.Env):
         self._terminated = False
         self._current_tick = self._start_tick
         self._total_reward = 0.
+
+        self._predict_datetime = None
+        predict_idx = self._start_tick + self.prediction_offset - 1
+        if predict_idx < self._end_tick:
+            self._predict_datetime = self.datetime_list[predict_idx]
         
         self._total_profit = 0.
         self._total_profit_long = 0.
@@ -231,6 +251,10 @@ class GettexStocksEnv(gym.Env):
         
         self._total_avg_vola_profit = 0.
         self._total_prediction_accuracy = 0.
+
+        self._current_price = 0.
+        self._next_price = 0.
+        self._predict_price = 0.
 
         self._first_rendering = True
 
@@ -249,8 +273,9 @@ class GettexStocksEnv(gym.Env):
         start = self._current_tick - 1
         end = self._current_tick + self.prediction_offset - 1
 
+        self._predict_datetime = self.datetime_list[end]
         predict_signals = self.signal_features[start:end+1]
-
+        
         #data_tuple = (date, weekdays, HH, MM, prices, diff, open, high, low, volume, volume_ask, volume_bid, \
         #              no_pre_bid, no_pre_ask, no_post, vola_profit, bid_long, bid_short, ask_long, ask_short)
         last_signal = predict_signals[-1]
@@ -275,6 +300,9 @@ class GettexStocksEnv(gym.Env):
             #    print ('signal:', signal[0], signal[1], signal[2], signal[3], signal[4], signal[5])
             #print('-'*10)
 
+        current_price = self.prices[start]
+        next_price = self.prices[end]
+        predict_price = 0
 
         if not TRADE_ERROR:
 
@@ -289,9 +317,8 @@ class GettexStocksEnv(gym.Env):
 
             self._total_avg_vola_profit = (self._total_avg_vola_profit + avg_vola_profit) / 2
 
-            current_price = self.prices[start]
+            
             if current_price == 0 or math.isnan(current_price): current_price = 0.001
-            next_price = self.prices[end]
             price_diff = (next_price - current_price) / current_price * 100
 
             #print (current_price, next_price, price_diff)
@@ -299,6 +326,8 @@ class GettexStocksEnv(gym.Env):
             predict_diff = price_diff - action[0]
             if predict_diff > self.max_volatility: predict_diff = self.max_volatility
             elif predict_diff < -self.max_volatility: predict_diff = -self.max_volatility
+
+            predict_price = current_price + (current_price * action[0] / 100)
 
             self._total_prediction_accuracy = (self._total_prediction_accuracy + abs(predict_diff)) / 2
 
@@ -316,7 +345,7 @@ class GettexStocksEnv(gym.Env):
 
                 if price_diff > 0: self._total_loss_long += price_diff
                 else: self._total_loss_short += abs(price_diff)                
-            else: 
+            elif price_diff > 0: 
                 step_reward = 1.0 - abs(predict_diff) / self.max_volatility
                 self._total_profit += abs(price_diff)
 
@@ -326,6 +355,10 @@ class GettexStocksEnv(gym.Env):
         #print (f'step_reward: {step_reward:5.3f}, action: {action[0]:5.3f}, '\
         #       f'current_price: {current_price:5.3f}, next_price: {next_price:5.3f} = {price_diff:.3f} %, '\
         #       f'predict_diff:{predict_diff:.3f}, total_profit:{self._total_profit:.3f}')
+
+        self._current_price = current_price
+        self._next_price = next_price
+        self._predict_price = predict_price
 
         return step_reward
 
@@ -350,6 +383,7 @@ class GettexStocksEnv(gym.Env):
     def close(self):
         del self._observation_cache
         del self.signal_features
+        del self.datetime_list
         del self.df_list
 
 
@@ -357,13 +391,12 @@ class GettexStocksEnv(gym.Env):
 # ============================================
 # DEBUG Env.
 # ============================================
-
 if __name__ == '__main__':
         
     import sys
     sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
     import gym_gettex
-    from gym_gettex.examples.utils import load_data, get_finanzen_stock_isin_list
+    from gym_gettex.examples.utils import load_data, get_finanzen_stock_isin_list, show_predict_stats
 
     #-----------------------------
     # debug_env
@@ -373,11 +406,11 @@ if __name__ == '__main__':
         window_size = 64 #30 #15
         prediction_offset = 4 #1
 
-        max_data = 256 #None #10
+        max_data = 1 #256 #None #10
         isin_list = []
-        #isin_list += ["GB00BYQ0JC66"]
+        isin_list += ["GB00BYQ0JC66"]
         date = None
-        #date = '2023-04-13+14'
+        date = '2023-04-13+14'
 
         #isin_list, df_list = load_data(window_size, isin_list, date, max_data)
 
@@ -397,10 +430,10 @@ if __name__ == '__main__':
         #print (obs)
 
 
-        isin_list = get_finanzen_stock_isin_list()
-        np.random.shuffle(isin_list)
+        #isin_list = get_finanzen_stock_isin_list()
+        #np.random.shuffle(isin_list)
 
-        batch_list = np.array_split(isin_list, len(isin_list)/max_data + 1)
+        batch_list = np.array_split(isin_list, len(isin_list)/max_data)
         len_batch = len(batch_list)
 
         for i in range (0, len_batch):
@@ -410,7 +443,7 @@ if __name__ == '__main__':
 
             batch_isin = batch_list[i]
 
-            batch_isin, df_list = load_data(window_size, batch_isin, date, None)
+            batch_isin, df_list, skip_counter = load_data(window_size, batch_isin, date, None)
             total_num_episodes = len(df_list)
             
             env.init_df_list(df_list)
@@ -420,19 +453,28 @@ if __name__ == '__main__':
             reward_over_episodes = []
             action_sum = 0
 
+            predict_stats = []
+
             for episode in tbar:
                 step = 1
 
                 obs, info = env.reset()
                 done = False
-
-                #print ('ISIN:', info['isin'])
+                isin = info['isin']
 
                 while not done:
                     action = env.action_space.sample()
                     #action = [-0.1]
                     action_sum += action[0]
                     obs, reward, terminated, truncated, info = env.step(action)
+
+                    predict_datetime = info['predict_datetime']
+                    current_price = info['current_price']
+                    next_price = info['next_price']
+                    predict_price = info['predict_price']
+
+                    predict_stats.append([predict_datetime, reward, current_price, next_price, action[0], predict_price])
+
                     #print (obs)
                     #print (reward, terminated, truncated, info)
                     done = terminated or truncated
@@ -446,6 +488,10 @@ if __name__ == '__main__':
             print(f'Max. Reward   : {np.max(reward_over_episodes):.3f}')
             print(f'action_sum    : {action_sum:.3f}')
             print(info)
+
+            show_predict_stats = True
+            if show_predict_stats:
+                show_predict_stats(isin, date, predict_stats)
 
             del df_list
         
