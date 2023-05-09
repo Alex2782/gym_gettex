@@ -221,8 +221,11 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
                     current_price = info[0]['current_price']
                     next_price = info[0]['next_price']
                     predict_price = info[0]['predict_price']
+                    _total_profit = info[0]['total_profit']
+                    avg_vola_profit = info[0]['avg_vola_profit']
 
-                    predict_stats.append([predict_datetime, reward[0], current_price, next_price, action[0][0], predict_price])
+                    predict_stats.append([predict_datetime, reward[0], current_price, next_price, 
+                                          action[0][0], predict_price, _total_profit, avg_vola_profit])
 
                 action_sum += action
 
@@ -252,8 +255,8 @@ def test_model(window_size=30, prediction_offset=2, max_data=256, isin_list = []
             loss_long.append(i['total_loss_long'])
             loss_short.append(i['total_loss_short'])
 
-            if _show_predict_stats:
-                show_predict_stats(isin, date, predict_stats)
+            if _show_predict_stats and len(isin_list) < 6:
+                show_predict_stats(isin, date, predict_stats, i['total_profit'], i['total_profit_long'], i['total_profit_short'])
 
         tbar.close()
 
@@ -285,29 +288,39 @@ window_size = 30
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
 #isin_list += ["GB00BYQ0JC66"]
-#isin_list += ["US0396531008"]
+isin_list += ["US88160R1014"] #tesla
+#isin_list += ["DE0008232125"]
+
 
 date = None
-#date = '2023-04-13' #'2023-04-14'
+#date = '2023-04-13'
 #date = '2023-04-13+14'
 max_data = 256 #10 # or None for all data
 
-#model_path = f'./checkpoint/GettexStocks-v0.3500K.29.pred_1.20230419_035236.PPO'
-#model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.23.pred_5.20230419_112113.TRPO'
-model_path = f'./checkpoint/obs_30/GettexStocks-v0.3500K.39.pred_6.20230419_121049.PPO'
-#model_path = f'./checkpoint/obs_64/GettexStocks-v0.obs_64.3500K.48.pred_2.20230422_150846.PPO'
 
-#vec_normalize_path = './checkpoint/GettexStocks-v0.pred_1.vec_normalize.20230419_041750.pkl'
-#vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_5.vec_normalize.20230419_113034.pkl'
-vec_normalize_path = './checkpoint/obs_30/GettexStocks-v0.pred_6.vec_normalize.20230419_135601.pkl'
-#vec_normalize_path = './checkpoint/obs_64/GettexStocks-v0.obs_64.pred_2.vec_normalize.20230422_170303.pkl'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.1000K.2.pred_3.20230502_211413.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.1000K.2.pred_3.20230502_210832.PPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.50000K.122.pred_1.20230503_063708.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.50000K.128.pred_2.20230503_162111.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.50000K.113.pred_3.20230503_203847.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.100000K.162.pred_2.20230506_092418.TRPO'
+model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.181.pred_3.20230507_113818.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.158.pred_4.20230507_235919.TRPO'
 
 
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230502_211744.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_1.vec_normalize.20230503_063708.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_2.vec_normalize.20230503_162111.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230503_203847.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_2.vec_normalize.20230506_092418.pkl'
+vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230507_113818.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_4.vec_normalize.20230507_235919.pkl'
 
-output_min_profit = 10.0 # or None for no filter
-_show_predict_stats = False
 
-prediction_offset_list = [6]
+output_min_profit = None # or None for no filter
+_show_predict_stats = True
+
+prediction_offset_list = [3]
 
 for prediction_offset in prediction_offset_list:
     test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path,

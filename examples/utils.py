@@ -78,12 +78,14 @@ def load_data(window_size, isin_list=[], date=None, max_data=100, min_df_len=Non
 #-----------------------------
 # show_predict_stats
 #-----------------------------
-def show_predict_stats(isin, date, predict_stats):
+def show_predict_stats(isin, date, predict_stats, total_profit, total_profit_long, total_profit_short):
 
     path = get_csv_path(isin, date)
     df = pd.read_csv(path)
     tm = df['Date'].astype(str) + ' ' + df['HH'].astype(str) + ':' + df['MM'].astype(str)
-    df['DateTime'] = pd.to_datetime(tm)
+    df['DateTime'] = pd.to_datetime(tm).dt.tz_localize('UTC')
+    df['DateTime_DE'] = df['DateTime'].dt.tz_convert('Europe/Berlin')
+    df['DateTime_US'] = df['DateTime'].dt.tz_convert('US/Eastern')
 
     candlestick_data = go.Candlestick(x=df['DateTime'],
                                     open=df['Open'],
@@ -92,13 +94,20 @@ def show_predict_stats(isin, date, predict_stats):
                                     close=df['Close'],
                                     name=isin)  
 
-    columns = ['Predict_DateTime', 'Reward', 'Current_Price', 'Next_Price', 'Action', 'Predict_Price']
+    columns = ['Predict_DateTime', 'Reward', 'Current_Price', 'Next_Price', 'Action', 
+               'Predict_Price', 'Total_Profit', 'Avg_Vola_Profit']
     predict_df = pd.DataFrame(predict_stats, columns=columns)
     #print (predict_df)
+
+    predict_df['Predict_DateTime'] = predict_df['Predict_DateTime'].dt.tz_localize('UTC')
+    predict_df['DateTime_DE'] = predict_df['Predict_DateTime'].dt.tz_convert('Europe/Berlin')
+    predict_df['DateTime_US'] = predict_df['Predict_DateTime'].dt.tz_convert('US/Eastern')
 
     predict_marker = []
     predict_color = []
     predict_info = []
+
+    at_us_stock_opening = {}
 
     for index, row in predict_df.iterrows():
         action = row['Action']
@@ -106,9 +115,19 @@ def show_predict_stats(isin, date, predict_stats):
         predict_price = row['Predict_Price']
         current_price = row['Current_Price']
         next_price = row['Next_Price']
-        price_diff = next_price - current_price
+        total_profit = row['Total_Profit']
+        avg_vola_profit = row['Avg_Vola_Profit']
 
-        if action > 0: marker = 'triangle-up'
+        _time_us = row['DateTime_US'].strftime('%H:%M')
+        
+        if at_us_stock_opening.get(_time_us) is None: at_us_stock_opening[_time_us] = 0
+        at_us_stock_opening[_time_us] += reward
+
+        price_diff = next_price - current_price
+        price_diff_p = price_diff / current_price * 100
+
+        if action < 0.05 and action > -0.05: marker = 'circle'
+        elif action > 0: marker = 'triangle-up'
         else: marker = 'triangle-down'
         
         if reward > 0: color = '#8cd4c8'
@@ -116,18 +135,19 @@ def show_predict_stats(isin, date, predict_stats):
         else: color = 'silver'
 
         info = (
-            f'predict: {action:.3f}<br>'
+            f'predict: {action:.3f} %<br>'
             f'reward: {reward:.3f}<br>'
-            f'price: {predict_price:.3f}<br>'
+            f'pred.price: {predict_price:.3f}<br>'
             f'old price: {current_price:.3f}<br>'
             f'new price: {next_price:.3f}<br>'
-            f'diff: {price_diff:.3f}<br>'
+            f'diff: {price_diff:.3f} ({price_diff_p:.3f} %)<br>'
+            f'total profit: {total_profit:.3f}<br>'
+            f'avg.vola.profit: {avg_vola_profit:.3f}<br>'
         )
 
         predict_marker.append(marker)
         predict_color.append(color)
         predict_info.append(info)
-        
 
     # predict marker
     marker_data = go.Scatter(x=predict_df['Predict_DateTime'],
@@ -139,14 +159,23 @@ def show_predict_stats(isin, date, predict_stats):
                             hovertext=predict_info,
                             opacity=0.9,
                             line=dict(color='#7777ff', width=2),
-                            name='Predict')
+                            name= 'Predict')
 
 
     fig = go.Figure(data=[candlestick_data, marker_data])
 
+    title = f'ISIN: {isin}, profit: {total_profit:.2f} %, long: {total_profit_long:.2f} %, short: {total_profit_short:.2f} %,'\
+            f' rewards @09:45 = {np.sum(at_us_stock_opening.get("09:45")):>9.3f}'
     # Diagramm layout konfigurieren
-    fig.update_layout(title=f'ISIN {isin} prediction',
+    fig.update_layout(title=title,
                     yaxis_title='Price',
                     xaxis_rangeslider_visible=False)
 
     fig.show()
+
+
+    for us_time in at_us_stock_opening:
+
+        print (f'{us_time} = {at_us_stock_opening[us_time]:>9.3f}')
+
+    

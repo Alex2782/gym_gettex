@@ -122,7 +122,7 @@ def train_test_model(model, env, orig_env, seed, total_num_episodes, total_learn
 def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isin_list = [], 
                    date = None, total_num_episodes = 50,
                    learning_timesteps_list_in_K = [3_500],
-                   model_class_list = [PPO, TRPO]):
+                   model_class_list = [PPO, TRPO], learning_rate = None):
     
     env_name = 'GettexStocks-v0'
 
@@ -232,8 +232,13 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
             if policy is None: policy = policy_dict.get('MlpLstmPolicy')
 
             try:
+                
+                model_init_dict = dict(policy=policy, env=env, verbose=0, tensorboard_log="./tensorboard_log/")
+                if learning_rate is not None: model_init_dict['learning_rate'] = learning_rate
+                print('model_init_dict:', model_init_dict)
+
                 if resume_model is None:
-                    model = model_class(policy, env, verbose=0, tensorboard_log="./tensorboard_log/")
+                    model = model_class(**model_init_dict)
                 else:
                     model = resume_model
 
@@ -246,7 +251,7 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
                 #                            deterministic=True, render=False)
 
                 now = datetime.now().strftime('%m%d_%H%M')
-                tb_log_name = f'{class_name}.obs_{window_size}.pred+{prediction_offset}.{step_key}.{now}'
+                tb_log_name = f'{class_name}.obs_{window_size}.pred_{prediction_offset}.{step_key}.{now}'
 
                 rewards = train_test_model(model, env, orig_env, seed, total_num_episodes, total_learning_timesteps, eval_callback, tb_log_name)
                 min, avg, max, = print_stats(rewards)
@@ -276,40 +281,43 @@ def start_training(window_size = 30, prediction_offset = 2, max_data = 1000, isi
 # configuration
 #========================================================================================
 
-window_size = 30
+window_size = 64
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
+isin_list += ["US88160R1014"] #tesla
 
 date = None
-#date = '2023-03-29'
+#date = '2023-04-14'
 max_data = 1000 # or None for all data
 
-learning_timesteps_list_in_K = [3_500]
+#learning_timesteps_list_in_K = [3_500]
+#learning_timesteps_list_in_K = [1000]
 #learning_timesteps_list_in_K = [10_000]  # 10k -> PPO = 1:15h, RecurrentPPO = 10:30h, A2C = 1:15h, TRPO = 50m, ARS = 23 min
 #learning_timesteps_list_in_K = [12_000] # (RecurrentPPO) = 12h
 #learning_timesteps_list_in_K = [45_000] #(for a2c, ppo, trpo) = 15h
 #learning_timesteps_list_in_K = [30_000] #(for a2c, ppo, trpo) = 10h
 #learning_timesteps_list_in_K = [15_000] #(for a2c, ppo, trpo) = 5h
 #learning_timesteps_list_in_K = [500, 1000, 5000, 25_000]
-#learning_timesteps_list_in_K = [150_000]
+#learning_timesteps_list_in_K = [50_000]
+learning_timesteps_list_in_K = [150_000]
 
 # RL Algorithms: https://stable-baselines3.readthedocs.io/en/master/guide/algos.html
-#model_class_list = [PPO, TRPO]
+model_class_list = [TRPO]
 #model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO]
-#model_class_list = [RecurrentPPO]
-model_class_list = [PPO, TRPO, PPO, TRPO, RecurrentPPO]
+#model_class_list = [ARS]
+#model_class_list = [PPO, TRPO, PPO, TRPO, PPO, TRPO, PPO, TRPO]
 #model_class_list = [A2C, PPO]
 #model_class_list = [A2C, PPO, RecurrentPPO, TRPO]
 #model_class_list = [A2C, DDPG, DQN, PPO, SAC, TD3,
 #                    ARS, QRDQN, RecurrentPPO, TQC, TRPO, MaskablePPO] #from sb3_contrib
 
 
-prediction_offset_list = range(1, 5)
-total_num_episodes = 50
-
+prediction_offset_list = range(1, 2)
+total_num_episodes = 10
+learning_rate = None # None = default
 
 for prediction_offset in prediction_offset_list:
 
     start_training(window_size, prediction_offset, max_data, isin_list, date, total_num_episodes, 
-                   learning_timesteps_list_in_K, model_class_list)
+                   learning_timesteps_list_in_K, model_class_list, learning_rate)
 

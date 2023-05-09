@@ -48,6 +48,7 @@ class GettexStocksEnv(gym.Env):
         self._current_price = None
         self._next_price = None
         self._predict_price = None
+        self._avg_vola_profit = None
 
         if df_list is not None:
             self.init_df_list(df_list)
@@ -191,7 +192,8 @@ class GettexStocksEnv(gym.Env):
 
             current_price = self._current_price,
             next_price = self._next_price,
-            predict_price = self._predict_price
+            predict_price = self._predict_price,
+            avg_vola_profit = self._avg_vola_profit
         )
 
 
@@ -255,6 +257,7 @@ class GettexStocksEnv(gym.Env):
         self._current_price = 0.
         self._next_price = 0.
         self._predict_price = 0.
+        self._avg_vola_profit = 0.
 
         self._first_rendering = True
 
@@ -269,6 +272,7 @@ class GettexStocksEnv(gym.Env):
 
     def _calculate_reward(self, action):
         step_reward = 0
+        action = action[0]
 
         start = self._current_tick - 1
         end = self._current_tick + self.prediction_offset - 1
@@ -279,6 +283,8 @@ class GettexStocksEnv(gym.Env):
         #data_tuple = (date, weekdays, HH, MM, prices, diff, open, high, low, volume, volume_ask, volume_bid, \
         #              no_pre_bid, no_pre_ask, no_post, vola_profit, bid_long, bid_short, ask_long, ask_short)
         last_signal = predict_signals[-1]
+        high = last_signal[7]
+        low = last_signal[8]
         no_pre_bid = last_signal[12]
         no_pre_ask = last_signal[13]
         vola_profit = last_signal[15]
@@ -303,6 +309,7 @@ class GettexStocksEnv(gym.Env):
         current_price = self.prices[start]
         next_price = self.prices[end]
         predict_price = 0
+        avg_vola_profit = 0
 
         if not TRADE_ERROR:
 
@@ -323,42 +330,38 @@ class GettexStocksEnv(gym.Env):
 
             #print (current_price, next_price, price_diff)
 
-            predict_diff = price_diff - action[0]
+            predict_diff = price_diff - action
             if predict_diff > self.max_volatility: predict_diff = self.max_volatility
             elif predict_diff < -self.max_volatility: predict_diff = -self.max_volatility
 
-            predict_price = current_price + (current_price * action[0] / 100)
+            predict_price = current_price + (current_price * action / 100)
 
             self._total_prediction_accuracy = (self._total_prediction_accuracy + abs(predict_diff)) / 2
 
-            #negative avg_vola_profit and high action = -0.85 reward
-            if avg_vola_profit < 0 and (action[0] > 0.25 or action[0] < -0.25):
-                step_reward = -0.85
-                self._total_profit -= abs(price_diff)
+            tolerance = (low + (high - low) / 2) * 0.0001
 
-                if price_diff > 0: self._total_loss_long += price_diff
-                else: self._total_loss_short += abs(price_diff)                  
-            #false prediction = -0.85 reward
-            elif (price_diff < 0 and action[0] > 0) or (price_diff > 0 and action[0] < 0): 
-                step_reward = -0.85
-                self._total_profit -= abs(price_diff)
+            if predict_price >= low - tolerance and predict_price <= high + tolerance:
+                step_reward = abs(action)
+                self._total_profit += abs(step_reward)
+                if action > 0: self._total_profit_long += action
+                else: self._total_profit_short += abs(action)                
+            else:
+                step_reward = -abs(action)
+                self._total_profit -= abs(step_reward)
+                if action > 0: self._total_loss_long += action
+                else: self._total_loss_short += abs(action)
 
-                if price_diff > 0: self._total_loss_long += price_diff
-                else: self._total_loss_short += abs(price_diff)                
-            elif price_diff > 0: 
-                step_reward = 1.0 - abs(predict_diff) / self.max_volatility
-                self._total_profit += abs(price_diff)
+              
 
-                if price_diff > 0: self._total_profit_long += price_diff
-                else: self._total_profit_short += abs(price_diff)
 
-        #print (f'step_reward: {step_reward:5.3f}, action: {action[0]:5.3f}, '\
+        #print (f'step_reward: {step_reward:5.3f}, action: {action:5.3f}, '\
         #       f'current_price: {current_price:5.3f}, next_price: {next_price:5.3f} = {price_diff:.3f} %, '\
         #       f'predict_diff:{predict_diff:.3f}, total_profit:{self._total_profit:.3f}')
 
         self._current_price = current_price
         self._next_price = next_price
         self._predict_price = predict_price
+        self._avg_vola_profit = avg_vola_profit
 
         return step_reward
 
