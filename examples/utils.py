@@ -3,6 +3,7 @@ import numpy as np
 import os
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime, timedelta
 
 # -------------------------------------------------
 # load_dict_data
@@ -34,6 +35,17 @@ def get_csv_path(isin, date):
     return path
 
 #-----------------------------
+# get_feather_path
+#-----------------------------
+def get_feather_path(isin, date):
+
+    filename = f'{isin}.feather'
+    if date is not None: filename = f'{isin}.{date}.feather'
+    path = f'/Users/alex/Develop/gettex/data_ssd/{filename}'
+
+    return path
+
+#-----------------------------
 # load_data
 #-----------------------------
 def load_data(window_size, isin_list=[], date=None, max_data=100, min_df_len=None):
@@ -51,14 +63,16 @@ def load_data(window_size, isin_list=[], date=None, max_data=100, min_df_len=Non
 
     for isin in isin_list:
         
-        path = get_csv_path(isin, date)
+        #path = get_csv_path(isin, date)
+        path = get_feather_path(isin, date)
 
         if not os.path.exists(path): 
             #print (f'not exists: {path}')
             skip_counter += 1
             continue
 
-        df = pd.read_csv(path, dtype=float)
+        #df = pd.read_csv(path, dtype=float)
+        df = pd.read_feather(path)
 
         if min_df_len is not None and min_df_len > len(df):
             skip_counter += 1
@@ -74,6 +88,44 @@ def load_data(window_size, isin_list=[], date=None, max_data=100, min_df_len=Non
 
     return isin_list, df_list, skip_counter
 
+
+#-----------------------------
+# show_trade_chart
+#-----------------------------
+def show_trade_chart(isin, chart_out):
+
+    #[row['datetime'], _prev_day_close, _open, _high, _low, _close]
+    
+    columns = ['datetime', 'prev_day_close', 'open', 'high', 'low', 'close']
+    df = pd.DataFrame(chart_out, columns=columns)
+
+    candlestick_data = go.Candlestick(x=df['datetime'],
+                                    open=df['open'],
+                                    high=df['high'],
+                                    low=df['low'],
+                                    close=df['close'],
+                                    name=isin)   
+
+    marker_data = go.Scatter(x=df['datetime'],
+                            y=df['prev_day_close'],
+                            mode='lines+markers',
+                            marker_size=14,
+                            opacity=0.9,
+                            line=dict(color='#7777ff', width=2),
+                            name= 'prev_day_close')
+
+
+    fig = go.Figure(data=[candlestick_data, marker_data])    
+
+    fig.update_layout(title=isin,
+                    yaxis_title='Price',
+                    #xaxis_range=['2023-05-01', '2023-05-10'], 
+                    #yaxis_range=[140, 160],
+                    xaxis_rangeslider_visible=False)
+
+    fig.show()
+
+    pass
 
 #-----------------------------
 # show_predict_stats
@@ -166,7 +218,7 @@ def show_predict_stats(isin, date, predict_stats, total_profit, total_profit_lon
 
     title = f'ISIN: {isin}, profit: {total_profit:.2f} %, long: {total_profit_long:.2f} %, short: {total_profit_short:.2f} %,'\
             f' rewards @09:45 = {np.sum(at_us_stock_opening.get("09:45")):>9.3f}'
-    # Diagramm layout konfigurieren
+    
     fig.update_layout(title=title,
                     yaxis_title='Price',
                     xaxis_rangeslider_visible=False)

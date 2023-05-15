@@ -284,7 +284,7 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=Warning)
 
-window_size = 30
+window_size = 64
 isin_list = [] #if empty -> load from '/Users/alex/Develop/gettex/finanzen.net.pickle'
 #isin_list += ["DE0007236101", "DE0008232125", "US83406F1021", "FI0009000681"]
 #isin_list += ["GB00BYQ0JC66"]
@@ -304,8 +304,9 @@ max_data = 256 #10 # or None for all data
 #model_path = f'./checkpoint/GettexStocks-v0.obs_30.50000K.128.pred_2.20230503_162111.TRPO'
 #model_path = f'./checkpoint/GettexStocks-v0.obs_30.50000K.113.pred_3.20230503_203847.TRPO'
 #model_path = f'./checkpoint/GettexStocks-v0.obs_30.100000K.162.pred_2.20230506_092418.TRPO'
-model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.181.pred_3.20230507_113818.TRPO'
+#model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.181.pred_3.20230507_113818.TRPO'
 #model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.158.pred_4.20230507_235919.TRPO'
+model_path = f'./checkpoint/GettexStocks-v0.obs_64.150000K.172.pred_1.20230509_135725.TRPO'
 
 
 #vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230502_211744.pkl'
@@ -313,14 +314,15 @@ model_path = f'./checkpoint/GettexStocks-v0.obs_30.150000K.181.pred_3.20230507_1
 #vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_2.vec_normalize.20230503_162111.pkl'
 #vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230503_203847.pkl'
 #vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_2.vec_normalize.20230506_092418.pkl'
-vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230507_113818.pkl'
+#vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_3.vec_normalize.20230507_113818.pkl'
 #vec_normalize_path = './checkpoint/GettexStocks-v0.obs_30.pred_4.vec_normalize.20230507_235919.pkl'
+vec_normalize_path = './checkpoint/GettexStocks-v0.obs_64.pred_1.vec_normalize.20230509_135725.pkl'
 
 
 output_min_profit = None # or None for no filter
 _show_predict_stats = True
 
-prediction_offset_list = [3]
+prediction_offset_list = [1]
 
 for prediction_offset in prediction_offset_list:
     test_model(window_size, prediction_offset, max_data, isin_list, date, output_min_profit, model_path, vec_normalize_path,
