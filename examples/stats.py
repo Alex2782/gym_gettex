@@ -146,7 +146,7 @@ for i in tbar:
             
             # (last) 4 Weeks 
             if _date_f < '2023-05-01': continue
-            if _date_f > '2023-06-01': continue 
+            if _date_f > '2023-12-31': continue 
 
             if _open < 2: break
 
