@@ -3,8 +3,9 @@ from gymnasium import spaces
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
+
 class GettexStocksEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
@@ -84,7 +85,28 @@ class GettexStocksEnv(gym.Env):
 
         pass
 
-
+    """
+    Data columns (total 17 columns):
+    #   Column               Non-Null Count  Dtype              
+    ---  ------               --------------  -----              
+    0   datetime             5148 non-null   datetime64[ns, UTC]
+    1   bid_size_max         5148 non-null   int64              
+    2   bid_size_min         5148 non-null   int64              
+    3   ask_size_max         5148 non-null   int64              
+    4   ask_size_min         5148 non-null   int64              
+    5   spread_max           5148 non-null   float64            
+    6   spread_min           5148 non-null   float64            
+    7   open                 5148 non-null   float64            
+    8   high                 5148 non-null   float64            
+    9   low                  5148 non-null   float64            
+    10  close                5148 non-null   float64            
+    11  activity             5148 non-null   int64              
+    12  volatility_long      5148 non-null   float64            
+    13  volatility_short     5148 non-null   float64            
+    14  vola_activity_long   5148 non-null   int64              
+    15  vola_activity_short  5148 non-null   int64              
+    16  vola_activity_equal  5148 non-null   int64              
+    """
     def _process_data(self, df_idx):
 
         df_dict = self.df_list[df_idx]
@@ -92,8 +114,7 @@ class GettexStocksEnv(gym.Env):
         frame_bound = df_dict['frame_bound']
         isin = df_dict['isin']
 
-        # Date,HH,MM,Open,High,Low,Close,Volume,Volume_Ask,Volume_Bid,no_pre_bid,no_pre_ask,
-        # no_post,vola_profit,bid_long,bid_short,ask_long,ask_short
+
         dt = df['Date'].astype(int).astype(str) + ' ' + df['HH'].astype(int).astype(str) + ':' + df['MM'].astype(int).astype(str)
         datetime_list = pd.to_datetime(dt)        
 
@@ -399,7 +420,7 @@ if __name__ == '__main__':
     import sys
     sys.path.append('./') # optional (if not installed via 'pip' -> ModuleNotFoundError)
     import gym_gettex
-    from gym_gettex.examples.utils import load_data, get_finanzen_stock_isin_list, show_predict_stats
+    from gym_gettex.examples.utils import load_data, get_finanzen_stock_isin_list, show_predict_stats, prepare_training_data
 
     #-----------------------------
     # debug_env
@@ -411,9 +432,9 @@ if __name__ == '__main__':
 
         max_data = 1 #256 #None #10
         isin_list = []
-        isin_list += ["GB00BYQ0JC66"]
+        #isin_list += ["GB00BYQ0JC66"]
+        isin_list += ["US88160R1014"] #tesla
         date = None
-        date = '2023-04-13+14'
 
         #isin_list, df_list = load_data(window_size, isin_list, date, max_data)
 
@@ -448,6 +469,9 @@ if __name__ == '__main__':
 
             batch_isin, df_list, skip_counter = load_data(window_size, batch_isin, date, None)
             total_num_episodes = len(df_list)
+
+            prepare_training_data(batch_isin[0], df_list[0]['df'])
+            exit()
             
             env.init_df_list(df_list)
 

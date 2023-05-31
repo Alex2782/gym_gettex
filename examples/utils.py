@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from pytz import timezone
 
 # -------------------------------------------------
 # load_dict_data
@@ -230,4 +231,110 @@ def show_predict_stats(isin, date, predict_stats, total_profit, total_profit_lon
 
         print (f'{us_time} = {at_us_stock_opening[us_time]:>9.3f}')
 
+
+
+#-----------------------------
+# calculate_rsi
+#-----------------------------
+def calculate_rsi(data, window=14):
+    close_prices = data['close'].values
+    deltas = np.diff(close_prices)
+
+    # Gewinne und Verluste aufteilen
+    gains = deltas.copy()
+    losses = deltas.copy()
+    gains[gains < 0] = 0
+    losses[losses > 0] = 0
+
+    avg_gains = []
+    avg_losses = []
+
+    for i in range(window, len(close_prices)):
+        avg_gain = np.mean(gains[i-window:i])  # angepasstes Fenster
+        avg_loss = np.abs(np.mean(losses[i-window:i]))  # angepasstes Fenster
+        avg_gains.append(avg_gain)
+        avg_losses.append(avg_loss)
+
+    avg_gains = np.array(avg_gains)
+    avg_losses = np.array(avg_losses)
+
+    # RSI-Werte berechnen
+    rs = avg_gains / avg_losses
+    rsi = 100 - (100 / (1 + rs))
+
+    # Länge der RSI-Werte anpassen
+    rsi = np.concatenate((np.full(window, np.nan), rsi))  # mit NaN-Werten auffüllen
+
+    return rsi
+
+#-----------------------------
+# prepare_training_data
+#-----------------------------
+def prepare_training_data(isin, df):
+
+    #TODO EUR -> USD
+    # indicators: EMA, RSI, etc.
+
+    drop_cols = ['bid_size_max', 'bid_size_min', 'ask_size_max', 'ask_size_min', 'spread_max', 'spread_min', 'activity', 'volatility_long', 'volatility_short', 'vola_activity_long', 'vola_activity_short', 'vola_activity_equal']
+    df.drop(drop_cols, axis=1, inplace=True)
+
+    df.set_index('datetime', inplace=True)
+    df_timeframes = []
+    frame_mode_list = ['15T', '30T', '1H', '1D']
     
+    for frame_mode in frame_mode_list:
+        # T = Minutes, H = Hour, D = Day
+        df = df.resample(frame_mode).agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last'
+        })
+
+        df_timeframes.append(df)
+
+    for df in df_timeframes:
+
+        df.dropna(inplace=True)
+        berlin_tz = timezone('Europe/Berlin')
+        newyork_tz = timezone('America/New_York')
+
+        df.reset_index(inplace=True)
+        df['berlin_time'] = df['datetime'].dt.tz_convert(berlin_tz)
+        df['newyork_time'] = df['datetime'].dt.tz_convert(newyork_tz)
+
+        df['berlin_hour'] = df['berlin_time'].dt.hour.astype('int8')
+        df['berlin_minute'] = df['berlin_time'].dt.minute.astype('int8')
+        df['newyork_hour'] = df['newyork_time'].dt.hour.astype('int8')
+        df['newyork_minute'] = df['newyork_time'].dt.minute.astype('int8')
+
+        df.drop(['berlin_time', 'newyork_time'], axis=1, inplace=True)
+
+        for window in [5, 9, 12, 26, 54]:
+            sma = df['close'].rolling(window=window).mean()
+            col_name = 'sma_' + str(window) 
+            df[col_name] = sma
+            #df.insert(len(df.columns), col_name, sma)
+
+            ema = df['close'].ewm(span=window, adjust=False).mean()
+            col_name = 'ema_' + str(window) 
+            df[col_name] = ema
+            #df.insert(len(df.columns), col_name, ema)
+
+            rsi = calculate_rsi(df, window)
+            print ('rsi:', rsi)
+            col_name = 'rsi_' + str(window) 
+            df[col_name] = rsi
+            #df.insert(len(df.columns), col_name, rsi)
+
+
+    for df in df_timeframes:
+        print ('-'*100)
+        print (df.head(10))
+        print (df.tail(10))
+    
+    df.info()
+
+
+
+
