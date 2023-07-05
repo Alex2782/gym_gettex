@@ -65,10 +65,11 @@ if __name__ == '__main__':
 
     time_now = datetime.datetime.now().time()
     #TODO check US-Time 16:02 - 21:00
-    target_time_min = datetime.time(22, 2) # 22:02
-    target_time_max = datetime.time(3, 0)  # 03:00
 
-    if time_now < target_time_min or (time_now > target_time_max and time_now < target_time_min):
+    target_time_min = datetime.time(3, 0) # 03:00
+    target_time_max = datetime.time(22, 2)  # 22:02
+
+    if time_now > target_time_min and time_now < target_time_max:
         print ('No download required.')
         exit()
 
@@ -101,6 +102,11 @@ if __name__ == '__main__':
             
             data = data['data']
             totalRecords = data['totalRecords']
+
+            if totalRecords == 0: 
+                print ('CONTINUE: no data')
+                continue
+
             offset += limit
 
             rows = data['rows']
